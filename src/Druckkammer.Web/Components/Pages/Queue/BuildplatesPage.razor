@@ -1,0 +1,414 @@
+@page "/batches"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject PrintQueueService QueueService
+@inject ManagedStorageService StorageService
+@inject UserContextService UserContext
+@inject ISnackbar Snackbar
+
+<PageTitle>Buildplates & Druckläufe – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">Buildplates & Druckläufe (Batching)</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Bündele offene Wünsche auf eine Druckplatte, lade alle STLs als Slicer-ZIP herunter und verbuche Teil-Fehldrucke mit einem Klick.
+        </MudText>
+    </div>
+</div>
+
+<!-- Offene Wünsche zu einer neuen Buildplate schnüren -->
+@if (_openRequests.Count > 0 && _currentUser.HasPermission(AppPermissions.QueueManageBatches))
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-5" Style="border-left: 4px solid #9575CD;">
+        <div class="d-flex justify-space-between align-center mb-2">
+            <MudText Typo="Typo.h6" Style="font-weight: 700;">
+                🧩 Neue Buildplate aus offenen Wünschen (@_openRequests.Count verfügbar) zusammenstellen
+            </MudText>
+            <MudChip T="string" Color="Color.Secondary" Size="Size.Small">
+                Ausgewählt: @_selectedIds.Count Wünsche (@SelectedVolumeMl.ToString("F1") ml)
+            </MudChip>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            @foreach (var req in _openRequests)
+            {
+                bool sel = _selectedIds.Contains(req.Id);
+                <MudChip T="string" Color="@(sel ? Color.Primary : Color.Default)"
+                         Variant="@(sel ? Variant.Filled : Variant.Outlined)"
+                         OnClick="@(() => ToggleSelect(req.Id))">
+                    @(sel ? "✓ " : "+ ")@(req.QuantityRequested)x @req.Title (@req.RequesterDisplayName · @req.EstimatedTotalVolumeMl.ToString("F1") ml)
+                </MudChip>
+            }
+        </div>
+
+        <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_batchName" Label="Bezeichnung der Buildplate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="int?" @bind-Value="_printerId" Label="Drucker" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var p in _printers)
+                    {
+                        <MudSelectItem T="int?" Value="@p.Id">@p.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="int?" @bind-Value="_materialId" Label="Material / Resin" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var m in _materials)
+                    {
+                        <MudSelectItem T="int?" Value="@m.Id">@m.Brand @m.Name (@m.ColorName)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.AddBox"
+                           Disabled="@(_selectedIds.Count == 0)"
+                           OnClick="CreateBatchAsync">
+                    Platte erstellen
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
+
+<!-- Liste aller Buildplates -->
+<MudGrid Spacing="3">
+    @foreach (var batch in _batches)
+    {
+        <MudItem xs="12">
+            <MudPaper Elevation="3" Class="pa-4" Style="border-radius: 12px;">
+                <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-3">
+                    <div>
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.h6" Style="font-weight: 800;">🖨️ @batch.BatchName</MudText>
+                            <MudChip T="string" Size="Size.Small" Color="@GetBatchStatusColor(batch.Status)">
+                                @batch.Status
+                            </MudChip>
+                        </div>
+                        <MudText Typo="Typo.caption" Style="opacity: 0.8;">
+                            Drucker: <strong>@(batch.Printer?.Name ?? "Standard")</strong> ·
+                            Material: <strong>@(batch.Material is not null ? $"{batch.Material.Brand} {batch.Material.Name} ({batch.Material.ColorName})" : "Standard")</strong> ·
+                            Geschätzt: <strong>@batch.EstimatedVolumeMl.ToString("F1") ml</strong>
+                            @(batch.ActualSlicerVolumeMl.HasValue ? $" · Exakt laut Slicer: {batch.ActualSlicerVolumeMl.Value:F1} ml" : "")
+                        </MudText>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.FolderZip"
+                                   Href="@($"/api/batches/{batch.Id}/zip")" Target="_blank">
+                            Alle STLs als Slicer-ZIP laden
+                        </MudButton>
+
+                        @if (_currentUser.HasPermission(AppPermissions.QueueManageBatches) && batch.Status != PrintBatchStatus.Completed)
+                        {
+                            @if (batch.Status == PrintBatchStatus.SlicedReady)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.PlayArrow"
+                                           OnClick="@(() => UpdateStatusAsync(batch.Id, PrintBatchStatus.Printing))">
+                                    Druck starten
+                                </MudButton>
+                            }
+                            @if (batch.Status == PrintBatchStatus.Printing)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.CleaningServices"
+                                           OnClick="@(() => UpdateStatusAsync(batch.Id, PrintBatchStatus.PostProcessing))">
+                                    In Nachbearbeitung (Waschen/Härten)
+                                </MudButton>
+                            }
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.CheckCircle"
+                                       OnClick="@(() => OpenMisprintCompletionModal(batch))">
+                                Platte abschließen (inkl. Teil-Fehldruck-Check)
+                            </MudButton>
+                        }
+                    </div>
+                </div>
+
+                <!-- Enthaltene Wünsche auf dieser Platte -->
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead>
+                        <tr>
+                            <th>Anforderer</th>
+                            <th>Modell / Wunsch</th>
+                            <th>Stückzahl</th>
+                            <th>Maßstab</th>
+                            <th>Volumen</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in batch.Requests)
+                        {
+                            <tr>
+                                <td><strong>@r.RequesterDisplayName</strong></td>
+                                <td>@r.Title</td>
+                                <td>@(r.QuantityRequested)x</td>
+                                <td>@r.ScalePercentage.ToString("F0")%</td>
+                                <td>@r.EstimatedTotalVolumeMl.ToString("F1") ml</td>
+                                <td>@NotificationService.GetGermanStatusName(r.Status)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+
+                <!-- Slicer-Tresor Datei am Drucklauf -->
+                <div class="d-flex flex-wrap justify-space-between align-center mt-3 pt-2" style="border-top: 1px solid rgba(255,255,255,0.08);">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.SaveAlt" Size="Size.Small" Color="Color.Secondary" />
+                        @if (!string.IsNullOrWhiteSpace(batch.SlicedPlateFilePath))
+                        {
+                            <MudLink Href="@($"/media/{batch.SlicedPlateFilePath}")" Target="_blank" Typo="Typo.caption">
+                                📥 Gespeicherte Plattendatei im Slicer-Tresor: <strong>@batch.SlicedPlateFileName</strong>
+                            </MudLink>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Style="opacity: 0.7;">
+                                Noch keine fertig geslicte Plattendatei (.lys, .ctb, .goo) für Wiederholungsdrucke hinterlegt.
+                            </MudText>
+                        }
+                    </div>
+
+                    @if (_currentUser.HasPermission(AppPermissions.QueueManageBatches))
+                    {
+                        <MudFileUpload T="IBrowserFile" FilesChanged="@((file) => UploadSlicedPlateFileAsync(batch, file))"
+                                       Accept=".lys,.lyt,.chitubox,.ctb,.goo,.gcode,.3mf">
+                            <ActivatorContent>
+                                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.UploadFile">
+                                    Plattendatei (.lys/.ctb) hinterlegen
+                                </MudButton>
+                            </ActivatorContent>
+                        </MudFileUpload>
+                    }
+                </div>
+            </MudPaper>
+        </MudItem>
+    }
+</MudGrid>
+
+<!-- Teil-Fehldruck-Recovery Dialog ("8 von 10 erfolgreich -> 2 automatisch neu einreihen") -->
+@if (_completingBatch is not null)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="9999">
+        <MudPaper Elevation="8" Class="pa-5" Style="width: 620px; max-width: 95vw; border-radius: 16px;">
+            <div class="d-flex align-center gap-2 mb-2">
+                <MudIcon Icon="@Icons.Material.Filled.FactCheck" Color="Color.Success" Size="Size.Large" />
+                <div>
+                    <MudText Typo="Typo.h6" Style="font-weight: 800;">Buildplate abschließen & Teil-Fehldruck-Recovery</MudText>
+                    <MudText Typo="Typo.caption" Style="opacity: 0.8;">
+                        Gib an, wie viele Figuren pro Wunsch gelungen sind. Fehlgeschlagene Exemplare werden automatisch für die nächste Buildplate neu eingereiht!
+                    </MudText>
+                </div>
+            </div>
+
+            <MudNumericField T="double?" @bind-Value="_actualSlicerMl" Label="Exakter Resin-Verbrauch laut Slicer in ml (optional)"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Class="my-3" />
+
+            <MudSimpleTable Dense="true" Class="mb-4">
+                <thead>
+                    <tr>
+                        <th>Wunsch (Anforderer)</th>
+                        <th>Geplant</th>
+                        <th>Erfolgreich gedruckt</th>
+                        <th>Fehldruck (Auto-Nachdruck)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var req in _completingBatch.Requests)
+                    {
+                        int succ = _succeededCounts.GetValueOrDefault(req.Id, req.QuantityRequested);
+                        int fail = Math.Max(0, req.QuantityRequested - succ);
+                        <tr>
+                            <td>
+                                <strong>@req.Title</strong>
+                                <MudText Typo="Typo.caption" Class="d-block">@req.RequesterDisplayName</MudText>
+                            </td>
+                            <td>@(req.QuantityRequested)x</td>
+                            <td style="width: 140px;">
+                                <MudNumericField T="int" Value="@succ"
+                                                 ValueChanged="@((val) => _succeededCounts[req.Id] = Math.Clamp(val, 0, req.QuantityRequested))"
+                                                 Min="0" Max="@req.QuantityRequested" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                            </td>
+                            <td>
+                                @if (fail > 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">
+                                        🔄 @(fail)x neu einreihen
+                                    </MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">✓ Alle gelungen</MudChip>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+
+            <div class="d-flex justify-end gap-2">
+                <MudButton Variant="Variant.Text" OnClick="@(() => _completingBatch = null)">Abbrechen</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.DoneAll"
+                           OnClick="ConfirmBatchCompletionWithMisprintRecoveryAsync">
+                    Abschließen & Nachdrucke anlegen
+                </MudButton>
+            </div>
+        </MudPaper>
+    </MudOverlay>
+}
+
+@code {
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private List<PrintBatch> _batches = [];
+    private List<PrintRequest> _openRequests = [];
+    private List<Printer> _printers = [];
+    private List<Material> _materials = [];
+
+    private HashSet<int> _selectedIds = [];
+    private string _batchName = $"Saturn 4 – Platte #{DateTime.Now:ddMM}";
+    private int? _printerId;
+    private int? _materialId;
+
+    private PrintBatch? _completingBatch;
+    private Dictionary<int, int> _succeededCounts = new();
+    private double? _actualSlicerMl;
+
+    private double SelectedVolumeMl =>
+        _openRequests.Where(r => _selectedIds.Contains(r.Id)).Sum(r => r.EstimatedTotalVolumeMl);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _batches = await db.PrintBatches
+            .Include(b => b.Printer)
+            .Include(b => b.Material)
+            .Include(b => b.Requests)
+            .OrderByDescending(b => b.CreatedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        _openRequests = await db.PrintRequests
+            .Where(r => r.Status == PrintRequestStatus.RequestedOpen)
+            .OrderByDescending(r => r.Priority)
+            .AsNoTracking()
+            .ToListAsync();
+
+        _printers = await db.Printers.AsNoTracking().ToListAsync();
+        _materials = await db.Materials.Where(m => m.IsAvailable).AsNoTracking().ToListAsync();
+
+        _printerId ??= _printers.FirstOrDefault()?.Id;
+        _materialId ??= _materials.FirstOrDefault()?.Id;
+    }
+
+    private void ToggleSelect(int id)
+    {
+        if (!_selectedIds.Remove(id))
+            _selectedIds.Add(id);
+    }
+
+    private async Task CreateBatchAsync()
+    {
+        if (_selectedIds.Count == 0) return;
+        await QueueService.CreateBatchFromRequestsAsync(
+            string.IsNullOrWhiteSpace(_batchName) ? "Neue Buildplate" : _batchName.Trim(),
+            _printerId,
+            _materialId,
+            _selectedIds.ToList());
+
+        _selectedIds.Clear();
+        await LoadDataAsync();
+        Snackbar.Add("Buildplate angelegt!", Severity.Success);
+    }
+
+    private async Task UpdateStatusAsync(int batchId, PrintBatchStatus status)
+    {
+        await QueueService.UpdateBatchStatusAsync(batchId, status);
+        await LoadDataAsync();
+        Snackbar.Add($"Buildplate-Status auf '{status}' aktualisiert!", Severity.Info);
+    }
+
+    private void OpenMisprintCompletionModal(PrintBatch batch)
+    {
+        _completingBatch = batch;
+        _actualSlicerMl = batch.ActualSlicerVolumeMl ?? batch.EstimatedVolumeMl;
+        _succeededCounts.Clear();
+        foreach (var r in batch.Requests)
+        {
+            _succeededCounts[r.Id] = r.QuantityRequested;
+        }
+    }
+
+    private async Task ConfirmBatchCompletionWithMisprintRecoveryAsync()
+    {
+        if (_completingBatch is null) return;
+        var results = _completingBatch.Requests
+            .Select(r =>
+            {
+                int succ = _succeededCounts.GetValueOrDefault(r.Id, r.QuantityRequested);
+                return new MisprintItemResult(r.Id, succ, Math.Max(0, r.QuantityRequested - succ));
+            })
+            .ToList();
+
+        var reQueued = await QueueService.CompleteBatchWithMisprintRecoveryAsync(
+            _completingBatch.Id,
+            results,
+            _actualSlicerMl);
+
+        _completingBatch = null;
+        await LoadDataAsync();
+
+        if (reQueued.Count > 0)
+        {
+            int retryCount = reQueued.Sum(x => x.QuantityRequested);
+            Snackbar.Add($"Platte abgeschlossen! {retryCount} fehlgeschlagene Figur(en) wurden automatisch für die nächste Platte neu eingereiht.", Severity.Warning);
+        }
+        else
+        {
+            Snackbar.Add("Platte erfolgreich abgeschlossen – alle Figuren sind abholbereit!", Severity.Success);
+        }
+    }
+
+    private async Task UploadSlicedPlateFileAsync(PrintBatch batch, IBrowserFile? file)
+    {
+        if (file is null) return;
+        await using var stream = file.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
+        var stored = await StorageService.StoreModelFileStreamAsync(
+            stream,
+            file.Name,
+            "Slicer-Tresor",
+            "Buildplates",
+            batch.BatchName,
+            checkDuplicateInDb: false);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrintBatches.FindAsync(batch.Id);
+        if (entity is not null)
+        {
+            entity.SlicedPlateFilePath = stored.RelativeStoragePath;
+            entity.SlicedPlateFileName = file.Name;
+            await db.SaveChangesAsync();
+            await LoadDataAsync();
+            Snackbar.Add($"Plattendatei '{file.Name}' im Slicer-Tresor gespeichert!", Severity.Success);
+        }
+    }
+
+    private static Color GetBatchStatusColor(PrintBatchStatus s) => s switch
+    {
+        PrintBatchStatus.Completed => Color.Success,
+        PrintBatchStatus.Printing => Color.Info,
+        PrintBatchStatus.PostProcessing => Color.Secondary,
+        _ => Color.Warning
+    };
+}

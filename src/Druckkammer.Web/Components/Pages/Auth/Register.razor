@@ -1,0 +1,63 @@
+@page "/register"
+@using Microsoft.AspNetCore.WebUtilities
+@inject NavigationManager Nav
+
+<PageTitle>Registrieren – Druckkammer</PageTitle>
+
+<MudGrid Justify="Justify.Center" Class="mt-6">
+    <MudItem xs="12" sm="8" md="5">
+        <MudPaper Elevation="4" Class="pa-6" Style="border-radius: 16px;">
+            <div class="d-flex flex-column align-center mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.PersonAdd" Color="Color.Secondary" Style="font-size: 2.8rem;" />
+                <MudText Typo="Typo.h5" Style="font-weight: 700;" Class="mt-2">Account erstellen</MudText>
+                <MudText Typo="Typo.body2" Style="opacity: 0.75;">Mit Einladungscode bist du sofort freigeschaltet.</MudText>
+            </div>
+
+            @if (_error == "invalid_invite")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">Der eingegebene Einladungscode ist ungültig oder abgelaufen.</MudAlert>
+            }
+            else if (_error == "invite_required")
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">Für diese Instanz ist ein gültiger Einladungscode erforderlich.</MudAlert>
+            }
+            else if (_error == "exists")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">Diese E-Mail-Adresse ist bereits registriert.</MudAlert>
+            }
+
+            <form method="post" action="/auth/register">
+                <MudTextField T="string" Name="displayName" Label="Dein Name / Spitzname (z.B. Alex)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Required="true" Class="mb-3" />
+                <MudTextField T="string" Name="email" Label="E-Mail-Adresse" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Required="true" Class="mb-3" />
+                <MudTextField T="string" Name="password" Label="Passwort (mind. 6 Zeichen)" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Required="true" Class="mb-3" />
+                <MudTextField T="string" Name="inviteCode" Label="Einladungscode (z.B. DND-GRUPPE-2026)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Value="@_inviteCode" HelperText="Ohne Code muss der Admin deinen Account manuell freischalten." Class="mb-4" />
+
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Secondary" FullWidth="true" Size="Size.Large"
+                           StartIcon="@Icons.Material.Filled.HowToReg">
+                    Jetzt registrieren
+                </MudButton>
+            </form>
+
+            <div class="text-center mt-4">
+                <MudLink Href="/login" Typo="Typo.body2">← Zurück zum Login</MudLink>
+            </div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string? _error;
+    private string _inviteCode = "DND-GRUPPE-2026";
+
+    protected override void OnInitialized()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("error", out var err)) _error = err.ToString();
+        if (query.TryGetValue("invite", out var inv)) _inviteCode = inv.ToString();
+    }
+}

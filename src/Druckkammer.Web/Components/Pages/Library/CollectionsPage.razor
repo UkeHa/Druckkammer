@@ -1,0 +1,319 @@
+@page "/collections"
+@page "/collections/{CollectionId:int}"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject PrintQueueService QueueService
+@inject ManagedStorageService StorageService
+@inject UserContextService UserContext
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Collections & Abo-Bundles – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">Collections & Abo-Releases</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Verschachtelbare Sammlungen für Patreon-/Tribe-Monatsbundles und persönliche D&D-Kampagnenlisten.
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CreateNewFolder"
+               OnClick="@(() => _showCreatePanel = !_showCreatePanel)">
+        Neue Collection anlegen
+    </MudButton>
+</div>
+
+@if (_showCreatePanel)
+{
+    <MudPaper Elevation="3" Class="pa-4 mb-4" Style="border-left: 4px solid #26A69A;">
+        <MudText Typo="Typo.h6" Class="mb-2">Neue Collection / Kampagnenliste erstellen</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_newName" Label="Name der Collection" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudTextField @bind-Value="_newStudio" Label="Creator / Studio oder Kampagne" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="2">
+                <MudTextField @bind-Value="_newRelease" Label="Release (z.B. 2026-11)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="int?" @bind-Value="_newParentId" Label="Übergeordnete Collection (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                    @foreach (var c in _allCollections)
+                    {
+                        <MudSelectItem T="int?" Value="@c.Id">@c.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="9">
+                <MudTextField @bind-Value="_newDescription" Label="Beschreibung" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3" Class="d-flex align-center justify-end gap-2">
+                <MudButton Variant="Variant.Text" OnClick="@(() => _showCreatePanel = false)">Abbrechen</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="CreateCollectionAsync">Anlegen</MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
+
+<MudGrid Spacing="3">
+    <!-- Linke Seitenleiste: Hierarchischer Collection-Baum -->
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="2" Class="pa-3">
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Alle Sammlungen (@_allCollections.Count)</MudText>
+            <MudList T="int" SelectedValue="_activeCollection?.Id ?? 0">
+                @foreach (var root in _allCollections.Where(c => c.ParentCollectionId == null))
+                {
+                    <MudListItem Value="@root.Id" OnClick="@(() => SelectCollection(root.Id))">
+                        <div class="d-flex justify-space-between align-center w-100">
+                            <div>
+                                <MudText Typo="Typo.body2" Style="font-weight: 700;">
+                                    @(root.IsCuratedBundle ? "📦" : "🎲") @root.Name
+                                </MudText>
+                                <MudText Typo="Typo.caption" Style="opacity: 0.7;">@root.CreatorStudio @(!string.IsNullOrWhiteSpace(root.ReleaseIdentifier) ? $"· {root.ReleaseIdentifier}" : "")</MudText>
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@root.Models.Count</MudChip>
+                        </div>
+                    </MudListItem>
+
+                    @foreach (var child in _allCollections.Where(c => c.ParentCollectionId == root.Id))
+                    {
+                        <MudListItem Value="@child.Id" OnClick="@(() => SelectCollection(child.Id))" Class="pl-6">
+                            <div class="d-flex justify-space-between align-center w-100">
+                                <div>
+                                    <MudText Typo="Typo.body2">↳ @child.Name</MudText>
+                                    <MudText Typo="Typo.caption" Style="opacity: 0.7;">@child.ReleaseIdentifier</MudText>
+                                </div>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Text">@child.Models.Count</MudChip>
+                            </div>
+                        </MudListItem>
+                    }
+                    <MudDivider />
+                }
+            </MudList>
+        </MudPaper>
+    </MudItem>
+
+    <!-- Rechte Hauptansicht: Bundle-Poster & enthaltene Modelle -->
+    <MudItem xs="12" md="8">
+        @if (_activeCollection is null)
+        {
+            <MudPaper Class="pa-6 text-center">
+                <MudText Typo="Typo.h6">Wähle links eine Collection aus.</MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <MudPaper Elevation="2" Class="pa-4 mb-4">
+                <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-3">
+                    <div>
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.h5" Style="font-weight: 800;">@_activeCollection.Name</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_activeCollection.ReleaseIdentifier))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info">@_activeCollection.ReleaseIdentifier</MudChip>
+                            }
+                        </div>
+                        <MudText Typo="Typo.body2" Style="opacity: 0.8;">@_activeCollection.Description</MudText>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <MudFileUpload T="IBrowserFile" FilesChanged="UploadBundlePosterAsync" Accept=".png,.jpg,.jpeg,.webp">
+                            <ActivatorContent>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.Panorama">
+                                    Bundle-Poster hochladen
+                                </MudButton>
+                            </ActivatorContent>
+                        </MudFileUpload>
+
+                        @if (_activeCollection.Models.Count > 0)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.ShoppingBag"
+                                       OnClick="AddEntireCollectionToCartAsync">
+                                Alle @_activeCollection.Models.Count Modelle in Session-Warenkorb legen
+                            </MudButton>
+                        }
+                    </div>
+                </div>
+
+                <!-- Bundle-Poster / Release-Übersicht im Kopfbereich -->
+                @if (!string.IsNullOrWhiteSpace(_activeCollection.PosterImagePath))
+                {
+                    <div class="mb-4 rounded overflow-hidden" style="border: 1px solid rgba(255,255,255,0.12);">
+                        <img src="@($"/media/{_activeCollection.PosterImagePath}")" alt="Bundle Release Poster"
+                             style="width: 100%; max-height: 300px; object-fit: cover; display: block;" />
+                    </div>
+                }
+                else
+                {
+                    <MudPaper Outlined="true" Class="pa-3 mb-4 d-flex align-center justify-space-between"
+                              Style="background: linear-gradient(90deg, rgba(149,117,205,0.10), rgba(38,166,154,0.08));">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Collections" Color="Color.Secondary" />
+                            <div>
+                                <MudText Typo="Typo.subtitle2">Bundle-Poster / Monats-Übersicht</MudText>
+                                <MudText Typo="Typo.caption" Style="opacity: 0.75;">
+                                    Lade das Sammel-Renderbild (Release-Poster) dieses Monats-Bundles hoch, um alle Figuren auf einen Blick zu sehen.
+                                </MudText>
+                            </div>
+                        </div>
+                        <MudText Typo="Typo.caption">
+                            Gesamtvolumen: <strong>@_activeCollection.Models.Sum(m => m.ModelItem?.EstimatedVolumeCm3 ?? 0).ToString("F1") ml</strong>
+                        </MudText>
+                    </MudPaper>
+                }
+
+                <!-- Enthaltene Modelle der Collection -->
+                <MudGrid Spacing="2">
+                    @foreach (var map in _activeCollection.Models)
+                    {
+                        var model = map.ModelItem;
+                        if (model is null) continue;
+                        <MudItem xs="12" sm="6">
+                            <MudPaper Outlined="true" Class="pa-3 d-flex justify-space-between align-center">
+                                <div style="cursor: pointer;" @onclick="@(() => Nav.NavigateTo($"/library/{model.Id}"))">
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">@model.Title</MudText>
+                                    <MudText Typo="Typo.caption" Style="opacity: 0.75;">
+                                        @LibraryCatalog.GetScaleBadgeText(model.ScaleSize) · 💧 @model.EstimatedVolumeCm3.ToString("F1") ml · @model.BoundingBoxZMm.ToString("F0") mm
+                                    </MudText>
+                                </div>
+                                <div class="d-flex gap-1">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ViewInAr" Size="Size.Small" Color="Color.Default"
+                                                   Href="@($"/library/{model.Id}")" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.AddShoppingCart" Size="Size.Small" Color="Color.Primary"
+                                                   OnClick="@(() => OpenRequestForModelAsync(model))" />
+                                </div>
+                            </MudPaper>
+                        </MudItem>
+                    }
+                </MudGrid>
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter] public int? CollectionId { get; set; }
+
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private List<Collection> _allCollections = [];
+    private Collection? _activeCollection;
+
+    private bool _showCreatePanel;
+    private string _newName = string.Empty;
+    private string _newStudio = "Loot Studios";
+    private string _newRelease = "2026-11";
+    private int? _newParentId;
+    private string _newDescription = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        await LoadCollectionsAsync();
+    }
+
+    private async Task LoadCollectionsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _allCollections = await db.Collections
+            .Include(c => c.Models)
+                .ThenInclude(mc => mc.ModelItem)
+                    .ThenInclude(m => m!.Files)
+            .OrderBy(c => c.CreatorStudio)
+            .ThenBy(c => c.Name)
+            .AsNoTracking()
+            .ToListAsync();
+
+        if (CollectionId.HasValue)
+            _activeCollection = _allCollections.FirstOrDefault(c => c.Id == CollectionId.Value);
+
+        _activeCollection ??= _allCollections.FirstOrDefault(c => c.Models.Count > 0) ?? _allCollections.FirstOrDefault();
+    }
+
+    private void SelectCollection(int id)
+    {
+        _activeCollection = _allCollections.FirstOrDefault(c => c.Id == id);
+    }
+
+    private async Task CreateCollectionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var col = new Collection
+        {
+            Name = _newName.Trim(),
+            Slug = ManagedStorageService.Slugify(_newName),
+            CreatorStudio = string.IsNullOrWhiteSpace(_newStudio) ? "Kampagne" : _newStudio.Trim(),
+            ReleaseIdentifier = _newRelease.Trim(),
+            ParentCollectionId = _newParentId,
+            Description = _newDescription.Trim(),
+            CreatedByUserId = _currentUser.UserId
+        };
+        db.Collections.Add(col);
+        await db.SaveChangesAsync();
+
+        _newName = string.Empty;
+        _newDescription = string.Empty;
+        _showCreatePanel = false;
+        CollectionId = col.Id;
+        await LoadCollectionsAsync();
+        Snackbar.Add($"Collection '{col.Name}' angelegt!", Severity.Success);
+    }
+
+    private async Task UploadBundlePosterAsync(IBrowserFile? poster)
+    {
+        if (poster is null || _activeCollection is null) return;
+        await using var stream = poster.OpenReadStream(maxAllowedSize: 30 * 1024 * 1024);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        string ext = Path.GetExtension(poster.Name).ToLowerInvariant();
+        string relPath = await StorageService.SaveThumbnailBytesAsync(ms.ToArray(), $"poster_{_activeCollection.Slug}", ext);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Collections.FindAsync(_activeCollection.Id);
+        if (entity is not null)
+        {
+            entity.PosterImagePath = relPath;
+            await db.SaveChangesAsync();
+            await LoadCollectionsAsync();
+            Snackbar.Add("Bundle-Poster gespeichert!", Severity.Success);
+        }
+    }
+
+    private async Task AddEntireCollectionToCartAsync()
+    {
+        if (_activeCollection is null) return;
+        int added = 0;
+        foreach (var map in _activeCollection.Models)
+        {
+            var m = map.ModelItem;
+            if (m is null) continue;
+            var req = new PrintRequest
+            {
+                Title = m.Title,
+                RequesterUserId = string.IsNullOrWhiteSpace(_currentUser.UserId) ? "guest" : _currentUser.UserId,
+                RequesterDisplayName = _currentUser.DisplayName,
+                ModelItemId = m.Id,
+                SelectedModelFileId = m.Files.FirstOrDefault()?.Id,
+                QuantityRequested = 1,
+                ScalePercentage = 100.0,
+                BaseUnitVolumeCm3 = m.EstimatedVolumeCm3,
+                RequesterNotes = $"Aus Collection '{_activeCollection.Name}'"
+            };
+            await QueueService.CreatePrintRequestAsync(req, addToSessionCart: true);
+            added++;
+        }
+
+        Snackbar.Add($"{added} Modelle aus '{_activeCollection.Name}' in deinen Session-Warenkorb gelegt!", Severity.Success);
+        Nav.NavigateTo("/cart");
+    }
+
+    private async Task OpenRequestForModelAsync(ModelItem model)
+    {
+        var parameters = new DialogParameters<CreateRequestDialog> { { x => x.PreselectedModel, model } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<CreateRequestDialog>("Druckwunsch anlegen", parameters, options);
+    }
+}

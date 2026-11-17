@@ -1,0 +1,460 @@
+@page "/admin"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserManager<ApplicationUser> UserManager
+@inject RoleManager<IdentityRole> RoleManager
+@inject ManagedStorageService StorageService
+@inject NotificationService NotificationService
+@inject UserContextService UserContext
+@inject ISnackbar Snackbar
+
+<PageTitle>Administration & Ordner-Scanner – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">System-Administration & Ordner-Scanner</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Verzeichnis-Scanner (Copy-on-Import + SHA-256 Deduplizierung), Benutzer & Einladungen, Rollen-Berechtigungen und Webhooks.
+        </MudText>
+    </div>
+</div>
+
+<MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+    <!-- Tab 1: Verzeichnis-Scanner (/import -> /data/storage) -->
+    <MudTabPanel Text="📂 Ordner-Scanner (NAS / Import)" Icon="@Icons.Material.Filled.DocumentScanner">
+        <MudPaper Elevation="2" Class="pa-4 mb-4">
+            <div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-3">
+                <div>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Verzeichnis-Scanner (Copy-on-Import & SHA-256 Hash-Deduplizierung)</MudText>
+                    <MudText Typo="Typo.body2" Style="opacity: 0.8;">
+                        Quell-Mount: <code>@StorageService.ImportDirectory</code> → Kanonischer App-Speicher: <code>@StorageService.StorageRoot</code>
+                    </MudText>
+                </div>
+
+                <div class="d-flex flex-wrap gap-2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Science"
+                               OnClick="GenerateSampleImportFolderAndScanAsync" Disabled="_isScanning">
+                        Test-Bundle in /import erzeugen & scannen
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Radar"
+                               OnClick="RunFolderScanAsync" Disabled="_isScanning">
+                        @(_isScanning ? "Scanne & Kopiere..." : "Import-Ordner jetzt scannen")
+                    </MudButton>
+                </div>
+            </div>
+
+            @if (_lastScanResult is not null)
+            {
+                <MudAlert Severity="Severity.Success" Class="mb-3">
+                    Scan abgeschlossen: <strong>@_lastScanResult.ScannedFilesCount Dateien</strong> geprüft ·
+                    <strong>@_lastScanResult.ImportedModelsCount neue Modelle</strong> angelegt ·
+                    <strong>@_lastScanResult.ImportedFilesCount Dateien</strong> kopiert ·
+                    <strong>@_lastScanResult.SkippedDuplicatesCount SHA-256 Duplikate</strong> übersprungen.
+                </MudAlert>
+
+                <MudPaper Outlined="true" Class="pa-3" Style="background: #10131A; font-family: monospace; font-size: 0.82rem; max-height: 240px; overflow-y: auto;">
+                    @foreach (var line in _lastScanResult.LogMessages)
+                    {
+                        <div>&gt; @line</div>
+                    }
+                </MudPaper>
+            }
+        </MudPaper>
+    </MudTabPanel>
+
+    <!-- Tab 2: Benutzer & Einladungs-Links -->
+    <MudTabPanel Text="👥 Benutzer & Einladungen" Icon="@Icons.Material.Filled.People">
+        <MudGrid Spacing="3">
+            <MudItem xs="12" md="7">
+                <MudPaper Elevation="2" Class="pa-4">
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-3">Registrierte Benutzer (@_users.Count)</MudText>
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>Name & E-Mail</th>
+                                <th>Rollen</th>
+                                <th>Status</th>
+                                <th style="text-align: right;">Rolle ändern / Freischalten</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var u in _users)
+                            {
+                                var roles = _userRoles.GetValueOrDefault(u.Id) ?? [];
+                                <tr>
+                                    <td>
+                                        <strong>@u.DisplayName</strong>
+                                        <MudText Typo="Typo.caption" Class="d-block">@u.Email</MudText>
+                                    </td>
+                                    <td>
+                                        @foreach (var r in roles)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@r</MudChip>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (u.IsApproved)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Success">Freigeschaltet</MudChip>
+                                        }
+                                        else
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">Wartet auf Admin</MudChip>
+                                        }
+                                    </td>
+                                    <td style="text-align: right;">
+                                        <div class="d-flex justify-end align-center gap-1">
+                                            @if (!u.IsApproved)
+                                            {
+                                                <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                                           OnClick="@(() => ApproveUserAsync(u.Id))">
+                                                    Freischalten
+                                                </MudButton>
+                                            }
+                                            <MudSelect T="string" Value="@(roles.FirstOrDefault() ?? AppRoles.Requester)"
+                                                       ValueChanged="@((newRole) => SetUserPrimaryRoleAsync(u, newRole))"
+                                                       Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width: 170px;">
+                                                @foreach (var r in AppRoles.All)
+                                                {
+                                                    <MudSelectItem Value="@r">@r</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="5">
+                <MudPaper Elevation="2" Class="pa-4">
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-2">🔑 Einladungs-Codes (Invite-Tokens)</MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <MudTextField @bind-Value="_newInviteDesc" Label="Beschreibung (z.B. Neue Kampagne)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <MudSelect T="string" @bind-Value="_newInviteRole" Label="Rolle" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width: 150px;">
+                            @foreach (var r in AppRoles.All)
+                            {
+                                <MudSelectItem Value="@r">@r</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="CreateInviteTokenAsync">Erzeugen</MudButton>
+                    </div>
+
+                    @foreach (var token in _inviteTokens)
+                    {
+                        <MudPaper Outlined="true" Class="pa-2 mb-2 d-flex justify-space-between align-center">
+                            <div>
+                                <MudText Typo="Typo.subtitle2" Style="font-family: monospace; font-weight: 800;">@token.Code</MudText>
+                                <MudText Typo="Typo.caption" Class="d-block">
+                                    @token.Description · Rolle: <strong>@token.AssignedRole</strong> · Genutzt: @token.UsedCount / @token.MaxUses
+                                </MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Info">/register?invite=@token.Code</MudText>
+                            </div>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                           OnClick="@(() => DeleteInviteAsync(token.Id))" />
+                        </MudPaper>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+    <!-- Tab 3: Rollen & Granulare Berechtigungs-Matrix (RBAC) -->
+    <MudTabPanel Text="🛡️ Rollen & Rechte-Matrix" Icon="@Icons.Material.Filled.Security">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-1">Granulare Einzelberechtigungen pro Rolle (RBAC)</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity: 0.75;">
+                Passe die Berechtigungen der Rollen live an – Änderungen wirken sofort für alle zugeordneten Benutzer.
+            </MudText>
+
+            <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                <thead>
+                    <tr>
+                        <th>Berechtigung</th>
+                        <th>Kategorie</th>
+                        @foreach (var roleName in AppRoles.All)
+                        {
+                            <th style="text-align: center;">@roleName</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var perm in AppPermissions.All)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@perm.Name</strong>
+                                <MudText Typo="Typo.caption" Class="d-block" Style="opacity: 0.7;">@perm.Description</MudText>
+                            </td>
+                            <td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@perm.Category</MudChip></td>
+                            @foreach (var roleName in AppRoles.All)
+                            {
+                                bool hasPerm = roleName == AppRoles.Admin || (_rolePermissions.GetValueOrDefault(roleName)?.Contains(perm.Key) ?? false);
+                                <td style="text-align: center;">
+                                    <MudCheckBox T="bool" Value="@hasPerm"
+                                                 Disabled="@(roleName == AppRoles.Admin)"
+                                                 Color="Color.Primary" Dense="true"
+                                                 ValueChanged="@((val) => ToggleRolePermissionAsync(roleName, perm.Key, val))" />
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    </MudTabPanel>
+
+    <!-- Tab 4: Webhooks & Benachrichtigungen -->
+    <MudTabPanel Text="🔔 Webhooks (Discord / Telegram / Mail)" Icon="@Icons.Material.Filled.Webhook">
+        <MudPaper Elevation="2" Class="pa-4 mb-4">
+            <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-3">Neuen Benachrichtigungs-Webhook anlegen</MudText>
+            <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+                <MudItem xs="12" sm="3">
+                    <MudTextField @bind-Value="_whName" Label="Name (z.B. D&D Discord #3d-druck)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="2">
+                    <MudSelect T="WebhookProviderType" @bind-Value="_whType" Label="Typ" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="WebhookProviderType.Discord">Discord Webhook</MudSelectItem>
+                        <MudSelectItem Value="WebhookProviderType.Telegram">Telegram Bot</MudSelectItem>
+                        <MudSelectItem Value="WebhookProviderType.GenericJson">Generischer JSON Webhook</MudSelectItem>
+                        <MudSelectItem Value="WebhookProviderType.SmtpEmail">E-Mail (SMTP)</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="5">
+                    <MudTextField @bind-Value="_whUrl" Label="Webhook URL / Endpoint" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="AddWebhookAsync">Hinzufügen</MudButton>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudGrid Spacing="2">
+            @foreach (var wh in _webhooks)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudPaper Elevation="2" Class="pa-3 d-flex justify-space-between align-center">
+                        <div>
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@wh.Name (@wh.ProviderType)</MudText>
+                            <MudText Typo="Typo.caption" Style="opacity: 0.7;">@wh.WebhookUrl</MudText>
+                        </div>
+                        <div class="d-flex gap-1">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small"
+                                       OnClick="@(() => TestWebhookAsync(wh))">
+                                Testen
+                            </MudButton>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                           OnClick="@(() => DeleteWebhookAsync(wh.Id))" />
+                        </div>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private bool _isScanning;
+    private FolderScanSummary? _lastScanResult;
+
+    private List<ApplicationUser> _users = [];
+    private Dictionary<string, IList<string>> _userRoles = new();
+    private List<InviteToken> _inviteTokens = [];
+    private Dictionary<string, HashSet<string>> _rolePermissions = new();
+    private List<NotificationWebhook> _webhooks = [];
+
+    private string _newInviteDesc = "Einladung für Mitspieler";
+    private string _newInviteRole = AppRoles.Requester;
+
+    private string _whName = string.Empty;
+    private WebhookProviderType _whType = WebhookProviderType.Discord;
+    private string _whUrl = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        await LoadAdminDataAsync();
+    }
+
+    private async Task LoadAdminDataAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _users = await db.Users.OrderBy(u => u.DisplayName).AsNoTracking().ToListAsync();
+        _inviteTokens = await db.InviteTokens.OrderByDescending(t => t.CreatedAt).AsNoTracking().ToListAsync();
+        _webhooks = await db.NotificationWebhooks.OrderByDescending(w => w.CreatedAt).AsNoTracking().ToListAsync();
+
+        _userRoles.Clear();
+        foreach (var u in _users)
+        {
+            var identityUser = await UserManager.FindByIdAsync(u.Id);
+            if (identityUser is not null)
+                _userRoles[u.Id] = await UserManager.GetRolesAsync(identityUser);
+        }
+
+        _rolePermissions.Clear();
+        foreach (var roleName in AppRoles.All)
+        {
+            var role = await RoleManager.FindByNameAsync(roleName);
+            if (role is not null)
+            {
+                var claims = await RoleManager.GetClaimsAsync(role);
+                _rolePermissions[roleName] = claims
+                    .Where(c => c.Type == AppPermissions.ClaimType)
+                    .Select(c => c.Value)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    private async Task RunFolderScanAsync()
+    {
+        _isScanning = true;
+        try
+        {
+            _lastScanResult = await StorageService.ScanImportDirectoryAsync(_currentUser.UserId);
+            Snackbar.Add($"Ordner-Scan beendet: {_lastScanResult.ImportedModelsCount} neue Modelle importiert!", Severity.Success);
+        }
+        finally
+        {
+            _isScanning = false;
+        }
+    }
+
+    private async Task GenerateSampleImportFolderAndScanAsync()
+    {
+        _isScanning = true;
+        try
+        {
+            string bundleDir = Path.Combine(StorageService.ImportDirectory, "OnePageRules", "2026-11_Dwarf_Guilds", "Dwarf_Berserker_Champion", "Presupported");
+            Directory.CreateDirectory(bundleDir);
+            string sampleStlPath = Path.Combine(bundleDir, "dwarf_berserker_32mm_presupported.stl");
+            if (!File.Exists(sampleStlPath))
+            {
+                byte[] stlBytes = StlAnalysisService.GenerateSampleBinaryStl(16f, 34f, 14);
+                await File.WriteAllBytesAsync(sampleStlPath, stlBytes);
+            }
+
+            _lastScanResult = await StorageService.ScanImportDirectoryAsync(_currentUser.UserId);
+            Snackbar.Add("Test-Bundle in /import erzeugt und per Copy-on-Import in die Bibliothek gescannt!", Severity.Success);
+        }
+        finally
+        {
+            _isScanning = false;
+        }
+    }
+
+    private async Task ApproveUserAsync(string userId)
+    {
+        var user = await UserManager.FindByIdAsync(userId);
+        if (user is not null)
+        {
+            user.IsApproved = true;
+            await UserManager.UpdateAsync(user);
+            await LoadAdminDataAsync();
+            Snackbar.Add($"Benutzer '{user.DisplayName}' freigeschaltet!", Severity.Success);
+        }
+    }
+
+    private async Task SetUserPrimaryRoleAsync(ApplicationUser user, string newRole)
+    {
+        var entity = await UserManager.FindByIdAsync(user.Id);
+        if (entity is null) return;
+        var currentRoles = await UserManager.GetRolesAsync(entity);
+        await UserManager.RemoveFromRolesAsync(entity, currentRoles);
+        await UserManager.AddToRoleAsync(entity, newRole);
+        await LoadAdminDataAsync();
+        Snackbar.Add($"Rolle für {user.DisplayName} auf '{newRole}' geändert!", Severity.Success);
+    }
+
+    private async Task CreateInviteTokenAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var token = new InviteToken
+        {
+            Code = $"INV-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}",
+            Description = _newInviteDesc.Trim(),
+            AssignedRole = _newInviteRole,
+            MaxUses = 10,
+            ExpiresAt = DateTime.UtcNow.AddMonths(3),
+            CreatedByUserId = _currentUser.UserId
+        };
+        db.InviteTokens.Add(token);
+        await db.SaveChangesAsync();
+        await LoadAdminDataAsync();
+        Snackbar.Add($"Einladungs-Code '{token.Code}' erstellt!", Severity.Success);
+    }
+
+    private async Task DeleteInviteAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var t = await db.InviteTokens.FindAsync(id);
+        if (t is not null)
+        {
+            db.InviteTokens.Remove(t);
+            await db.SaveChangesAsync();
+            await LoadAdminDataAsync();
+        }
+    }
+
+    private async Task ToggleRolePermissionAsync(string roleName, string permissionKey, bool enabled)
+    {
+        var role = await RoleManager.FindByNameAsync(roleName);
+        if (role is null) return;
+
+        var claims = await RoleManager.GetClaimsAsync(role);
+        var existing = claims.FirstOrDefault(c => c.Type == AppPermissions.ClaimType && c.Value == permissionKey);
+
+        if (enabled && existing is null)
+        {
+            await RoleManager.AddClaimAsync(role, new Claim(AppPermissions.ClaimType, permissionKey));
+        }
+        else if (!enabled && existing is not null)
+        {
+            await RoleManager.RemoveClaimAsync(role, existing);
+        }
+
+        await LoadAdminDataAsync();
+        Snackbar.Add($"Berechtigung '{permissionKey}' für Rolle '{roleName}' aktualisiert.", Severity.Info);
+    }
+
+    private async Task AddWebhookAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_whName)) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.NotificationWebhooks.Add(new NotificationWebhook
+        {
+            Name = _whName.Trim(),
+            ProviderType = _whType,
+            WebhookUrl = _whUrl.Trim(),
+            IsEnabled = true
+        });
+        await db.SaveChangesAsync();
+        _whName = string.Empty;
+        _whUrl = string.Empty;
+        await LoadAdminDataAsync();
+        Snackbar.Add("Webhook gespeichert!", Severity.Success);
+    }
+
+    private async Task TestWebhookAsync(NotificationWebhook wh)
+    {
+        await NotificationService.SendTestNotificationAsync(wh);
+        Snackbar.Add($"Test-Benachrichtigung an '{wh.Name}' ausgelöst!", Severity.Info);
+    }
+
+    private async Task DeleteWebhookAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var w = await db.NotificationWebhooks.FindAsync(id);
+        if (w is not null)
+        {
+            db.NotificationWebhooks.Remove(w);
+            await db.SaveChangesAsync();
+            await LoadAdminDataAsync();
+        }
+    }
+}

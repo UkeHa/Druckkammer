@@ -1,0 +1,293 @@
+@using Druckkammer.Web.Data
+@using Druckkammer.Web.Data.Entities
+@using Druckkammer.Web.Services
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ManagedStorageService StorageService
+@inject OpenGraphService OpenGraphService
+@inject UserContextService UserContext
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Modell oder ZIP-Bundle in die Bibliothek hochladen</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-3" @bind-ActivePanelIndex="_uploadMode">
+            <MudTabPanel Text="Einzeldateien (STL, LYS, Bilder)" Icon="@Icons.Material.Filled.InsertDriveFile">
+                <MudPaper Outlined="true" Class="pa-4 mb-3 text-center" Style="border-style: dashed;">
+                    <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnMultiFilesSelected" MaximumFileCount="30"
+                                   Accept=".stl,.obj,.3mf,.lys,.lyt,.chitubox,.ctb,.goo,.gcode,.png,.jpg,.jpeg,.webp,.pdf">
+                        <ActivatorContent>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.LibraryAdd">
+                                Zugehörige Modell-Dateien auswählen (Supported, Unsupported, Base, Render-Bild)
+                            </MudButton>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                    <MudText Typo="Typo.caption" Class="d-block mt-2" Style="color: #90A4AE;">
+                        Dateien werden per SHA-256 gehasht und in den verwalteten Speicher kopiert.
+                    </MudText>
+                    @if (_selectedFiles.Count > 0)
+                    {
+                        <div class="d-flex flex-wrap justify-center gap-1 mt-2">
+                            @foreach (var f in _selectedFiles)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Secondary">@f.Name (@((f.Size / 1024.0).ToString("F0")) KB)</MudChip>
+                            }
+                        </div>
+                    }
+                </MudPaper>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Komplettes ZIP-Bundle" Icon="@Icons.Material.Filled.FolderZip">
+                <MudPaper Outlined="true" Class="pa-4 mb-3 text-center" Style="border-style: dashed;">
+                    <MudFileUpload T="IBrowserFile" FilesChanged="OnZipFileSelected" Accept=".zip">
+                        <ActivatorContent>
+                            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Archive">
+                                ZIP-Archiv auswählen (.zip)
+                            </MudButton>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                    <MudText Typo="Typo.caption" Class="d-block mt-2" Style="color: #90A4AE;">
+                        Entpackt automatisch Unterordner (Supported, Unsupported, Bases, Lychee, Renders) und berechnet das STL-Volumen.
+                    </MudText>
+                    @if (_selectedZipFile is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="mt-2">
+                            📦 @_selectedZipFile.Name (@((_selectedZipFile.Size / (1024.0 * 1024.0)).ToString("F1")) MB)
+                        </MudChip>
+                    }
+                </MudPaper>
+            </MudTabPanel>
+        </MudTabs>
+
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="8">
+                <MudTextField @bind-Value="_title" Label="Modellname" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="TabletopScaleSize" @bind-Value="_scaleSize" Label="D&D / Tabletop-Größe" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="TabletopScaleSize.Tiny">Tiny (&lt;20mm)</MudSelectItem>
+                    <MudSelectItem Value="TabletopScaleSize.SmallMedium">Small / Medium (25–32mm)</MudSelectItem>
+                    <MudSelectItem Value="TabletopScaleSize.Large">Large (50mm Base)</MudSelectItem>
+                    <MudSelectItem Value="TabletopScaleSize.Huge">Huge (75mm Base)</MudSelectItem>
+                    <MudSelectItem Value="TabletopScaleSize.Gargantuan">Gargantuan (100mm+ Boss)</MudSelectItem>
+                    <MudSelectItem Value="TabletopScaleSize.TerrainScenery">Terrain / Scenery</MudSelectItem>
+                    <MudSelectItem Value="TabletopScaleSize.BustDisplay">Büste / 75mm Display</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_creatorStudio" Label="Creator / Studio (z.B. Loot Studios, Archvillain)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudTextField @bind-Value="_releaseMonth" Label="Release-Monat (z.B. 2026-10)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="PrintingTechnology" @bind-Value="_recommendedTech" Label="Empf. Verfahren" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="PrintingTechnology.ResinSLA">Resin (SLA/MSLA)</MudSelectItem>
+                    <MudSelectItem Value="PrintingTechnology.FilamentFDM">Filament (FDM)</MudSelectItem>
+                    <MudSelectItem Value="PrintingTechnology.Both">Beides (Resin & FDM)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" @bind-Value="_selectedCollectionId" Label="Collection / Bundle zuordnen" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                    @foreach (var c in _collections)
+                    {
+                        <MudSelectItem T="int?" Value="@c.Id">@c.CreatorStudio — @c.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int" MultiSelection="true" @bind-SelectedValues="_selectedTagIds" Label="Tags auswählen" Variant="Variant.Outlined" Margin="Margin.Dense"
+                           ToStringFunc="@(id => _tags.FirstOrDefault(t => t.Id == id)?.Name ?? id.ToString())">
+                    @foreach (var tag in _tags)
+                    {
+                        <MudSelectItem T="int" Value="@tag.Id">@tag.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12">
+                <div class="d-flex gap-2 align-center">
+                    <MudTextField @bind-Value="_externalUrl" Label="Optional: Externe URL (MyMiniFactory, Printables, Thingiverse)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+                    <MudButton Variant="Variant.Outlined" Color="Color.Info" OnClick="FetchOpenGraphAsync" StartIcon="@Icons.Material.Filled.AutoFixHigh">
+                        URL-Daten laden
+                    </MudButton>
+                </div>
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_description" Label="Beschreibung / Druckhinweise" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())">Abbrechen</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="SaveModelAsync" Disabled="_isUploading">
+            @(_isUploading ? "Kopiere & Analysiere..." : "In Bibliothek speichern")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private int _uploadMode;
+    private IReadOnlyList<IBrowserFile> _selectedFiles = [];
+    private IBrowserFile? _selectedZipFile;
+
+    private string _title = string.Empty;
+    private string _creatorStudio = "Loot Studios";
+    private string _releaseMonth = DateTime.Now.ToString("yyyy-MM");
+    private TabletopScaleSize _scaleSize = TabletopScaleSize.SmallMedium;
+    private PrintingTechnology _recommendedTech = PrintingTechnology.ResinSLA;
+    private int? _selectedCollectionId;
+    private IReadOnlyCollection<int> _selectedTagIds = [];
+    private string _externalUrl = string.Empty;
+    private string _description = string.Empty;
+    private string? _ogImageUrl;
+    private bool _isUploading;
+
+    private List<Collection> _collections = [];
+    private List<Tag> _tags = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _collections = await db.Collections.OrderBy(c => c.CreatorStudio).ThenBy(c => c.Name).ToListAsync();
+        _tags = await db.Tags.OrderBy(t => t.Name).ToListAsync();
+        _selectedCollectionId = _collections.FirstOrDefault()?.Id;
+    }
+
+    private void OnMultiFilesSelected(IReadOnlyList<IBrowserFile>? files)
+    {
+        if (files is null || files.Count == 0) return;
+        _selectedFiles = files;
+        if (string.IsNullOrWhiteSpace(_title))
+        {
+            _title = Path.GetFileNameWithoutExtension(files[0].Name).Replace('_', ' ').Replace('-', ' ');
+        }
+    }
+
+    private void OnZipFileSelected(IBrowserFile? zipFile)
+    {
+        _selectedZipFile = zipFile;
+        if (zipFile is not null && string.IsNullOrWhiteSpace(_title))
+        {
+            _title = Path.GetFileNameWithoutExtension(zipFile.Name).Replace('_', ' ').Replace('-', ' ');
+        }
+    }
+
+    private async Task FetchOpenGraphAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_externalUrl)) return;
+        var meta = await OpenGraphService.FetchMetadataAsync(_externalUrl);
+        if (meta.IsSuccess)
+        {
+            if (!string.IsNullOrWhiteSpace(meta.Title)) _title = meta.Title;
+            if (!string.IsNullOrWhiteSpace(meta.Description)) _description = meta.Description;
+            if (!string.IsNullOrWhiteSpace(meta.SiteName)) _creatorStudio = meta.SiteName;
+            _ogImageUrl = meta.ImageUrl;
+            Snackbar.Add($"OpenGraph-Metadaten von {meta.SiteName} geladen!", Severity.Success);
+        }
+    }
+
+    private async Task SaveModelAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_title))
+        {
+            Snackbar.Add("Bitte einen Modellnamen eingeben.", Severity.Warning);
+            return;
+        }
+
+        _isUploading = true;
+        try
+        {
+            var user = await UserContext.GetCurrentUserAsync();
+
+            if (_uploadMode == 1 && _selectedZipFile is not null)
+            {
+                await using var zipStream = _selectedZipFile.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
+                var imported = await StorageService.ImportZipBundleAsModelAsync(
+                    zipStream,
+                    _selectedZipFile.Name,
+                    _title,
+                    _creatorStudio,
+                    _releaseMonth,
+                    _selectedCollectionId,
+                    _selectedTagIds.ToList(),
+                    _scaleSize,
+                    user.UserId);
+
+                Snackbar.Add($"ZIP-Bundle '{imported.Title}' ({imported.Files.Count} Dateien, {imported.EstimatedVolumeCm3:F1} ml) importiert!", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(imported));
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var collection = _selectedCollectionId.HasValue
+                ? await db.Collections.FindAsync(_selectedCollectionId.Value)
+                : null;
+
+            var model = new ModelItem
+            {
+                Title = _title.Trim(),
+                Slug = ManagedStorageService.Slugify(_title),
+                CreatorStudio = string.IsNullOrWhiteSpace(_creatorStudio) ? "Community" : _creatorStudio.Trim(),
+                ReleaseMonth = _releaseMonth.Trim(),
+                ScaleSize = _scaleSize,
+                NativeScaleMm = _scaleSize == TabletopScaleSize.BustDisplay ? 75.0 : 32.0,
+                RecommendedTech = _recommendedTech,
+                ExternalSourceUrl = string.IsNullOrWhiteSpace(_externalUrl) ? null : _externalUrl.Trim(),
+                Description = _description.Trim(),
+                ThumbnailPath = _ogImageUrl,
+                CreatedByUserId = user.UserId
+            };
+
+            int duplicateCount = 0;
+            foreach (var file in _selectedFiles)
+            {
+                await using var stream = file.OpenReadStream(maxAllowedSize: 250 * 1024 * 1024);
+                var stored = await StorageService.StoreModelFileStreamAsync(
+                    stream,
+                    file.Name,
+                    model.CreatorStudio,
+                    collection?.Name ?? "Allgemein",
+                    model.Title);
+
+                if (stored.IsDuplicate) duplicateCount++;
+                ManagedStorageService.AttachStoredFileToModel(model, file.Name, stored, collection);
+            }
+
+            ManagedStorageService.FinalizeModelMetrics(model);
+
+            if (collection is not null)
+                model.Collections.Add(new ModelCollectionMap { CollectionId = collection.Id });
+
+            foreach (var tagId in _selectedTagIds.Distinct())
+                model.Tags.Add(new ModelTagMap { TagId = tagId });
+
+            db.ModelItems.Add(model);
+            await db.SaveChangesAsync();
+
+            string dupHint = duplicateCount > 0 ? $" ({duplicateCount} Duplikat-Hash wiederverwendet)" : "";
+            Snackbar.Add($"Modell '{model.Title}' gespeichert{dupHint}!", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(model));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Fehler beim Speichern: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isUploading = false;
+        }
+    }
+}

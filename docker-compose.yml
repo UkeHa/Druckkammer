@@ -1,0 +1,21 @@
+services:
+  druckkammer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/ukeha/druckkammer:latest
+    container_name: druckkammer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - Druckkammer__DataDirectory=/data
+      - Druckkammer__ImportDirectory=/import
+      - Druckkammer__AdminEmail=admin@druckkammer.local
+      - Druckkammer__AdminInitialPassword=Druckkammer!2026
+    volumes:
+      # Verwalteter App-Speicher (SQLite Datenbank, kopierte Modelle, Thumbnails, Makes-Fotos)
+      - ./data:/data
+      # Quell-Ordner für den Verzeichnis-Scanner (z.B. NAS-Mount mit Patreon-Bundles; wird nur gelesen & kopiert)
+      - ./import:/import:ro

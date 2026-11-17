@@ -1,0 +1,413 @@
+@page "/kanban"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject PrintQueueService QueueService
+@inject NotificationService NotificationService
+@inject UserContextService UserContext
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Kanban-Board & Druckjob-Queue – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">Druckjob-Kanban-Board</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Alle eingereichten Wünsche – vom Backlog über die Buildplate bis zur fertigen Übergabe.
+        </MudText>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 align-center">
+        @if (_selectedOpenRequestIds.Count > 0 && _currentUser.HasPermission(AppPermissions.QueueManageBatches))
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Layers"
+                       OnClick="@(() => _showQuickBatchPanel = true)">
+                Ausgewählte (@_selectedOpenRequestIds.Count) auf Buildplate bündeln
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddShoppingCart"
+                   OnClick="OpenNewRequestDialogAsync">
+            Neuer Druckwunsch
+        </MudButton>
+    </div>
+</div>
+
+<!-- Schnell-Bündelung auf eine Buildplate -->
+@if (_showQuickBatchPanel)
+{
+    <MudPaper Elevation="3" Class="pa-4 mb-4" Style="border-left: 4px solid #26A69A;">
+        <MudText Typo="Typo.h6" Class="mb-2">
+            Ausgewählte @_selectedOpenRequestIds.Count Wünsche auf eine neue Buildplate (Drucklauf) packen
+        </MudText>
+        <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_newBatchName" Label="Name der Buildplate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="int?" @bind-Value="_newBatchPrinterId" Label="Drucker" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var p in _printers)
+                    {
+                        <MudSelectItem T="int?" Value="@p.Id">@p.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="int?" @bind-Value="_newBatchMaterialId" Label="Resin / Filament" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var m in _materials)
+                    {
+                        <MudSelectItem T="int?" Value="@m.Id">@m.Brand @m.Name (@m.ColorName)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="2" Class="d-flex justify-end gap-1">
+                <MudButton Variant="Variant.Text" OnClick="@(() => _showQuickBatchPanel = false)">Abbrechen</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="CreateBatchFromSelectedAsync">Bündeln</MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
+
+<!-- Filterzeile -->
+<MudPaper Elevation="1" Class="pa-3 mb-4 d-flex flex-wrap gap-3 align-center justify-space-between">
+    <div class="d-flex flex-wrap gap-2 align-center">
+        <MudSelect T="string" @bind-Value="_filterRequester" Label="Anforderer" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Style="min-width: 180px;">
+            @foreach (var reqName in _requesters)
+            {
+                <MudSelectItem Value="@reqName">@reqName</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudSelect T="int?" @bind-Value="_filterOrderId" Label="Session-Wunschpaket" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Style="min-width: 240px;">
+            @foreach (var ord in _orders)
+            {
+                <MudSelectItem T="int?" Value="@ord.Id">@ord.Title (@ord.RequesterDisplayName)</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+
+    <div class="d-flex align-center gap-2">
+        <MudCheckBox T="bool" @bind-Value="_showArchivedAndRejected" Label="Archivierte / Übergebene anzeigen" Dense="true" Color="Color.Secondary" />
+    </div>
+</MudPaper>
+
+<!-- 5 Kanban-Spalten -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(265px, 1fr)); gap: 16px; align-items: start;">
+    @foreach (var col in KanbanColumns)
+    {
+        var items = FilteredRequests.Where(r => r.Status == col.Status).OrderByDescending(r => r.Priority).ThenBy(r => r.CreatedAt).ToList();
+        double colVolume = items.Sum(x => x.EstimatedTotalVolumeMl);
+        int colMinis = items.Sum(x => x.QuantityRequested);
+
+        <MudPaper Elevation="2" Class="pa-3" Style="@($"border-top: 4px solid {col.AccentHex}; min-height: 520px;")">
+            <div class="d-flex justify-space-between align-center mb-1">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 800;">@col.Title</MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Style="@($"background: {col.AccentHex}; color: #fff;")">
+                    @items.Count (@colMinis Fig.)
+                </MudChip>
+            </div>
+            <MudText Typo="Typo.caption" Class="d-block mb-3" Style="opacity: 0.7;">
+                💧 Σ @colVolume.ToString("F1") ml geschätzt
+            </MudText>
+
+            @foreach (var item in items)
+            {
+                bool isSelectedForBatch = _selectedOpenRequestIds.Contains(item.Id);
+                <MudPaper Elevation="3" Class="pa-3 mb-3" Style="border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+                    <div class="d-flex justify-space-between align-start gap-1 mb-1">
+                        <div class="d-flex align-center gap-1">
+                            @if (item.Status == PrintRequestStatus.RequestedOpen && _currentUser.HasPermission(AppPermissions.QueueManageBatches))
+                            {
+                                <MudCheckBox T="bool" Value="@isSelectedForBatch"
+                                             ValueChanged="@((val) => ToggleSelectForBatch(item.Id, val))"
+                                             Dense="true" Size="Size.Small" Color="Color.Secondary" />
+                            }
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Style="font-weight: 800;">
+                                @(item.QuantityRequested)x
+                            </MudChip>
+                            @if (item.Priority == RequestPriority.HighSessionUrgent)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error">🔥 Session</MudChip>
+                            }
+                        </div>
+                        <MudText Typo="Typo.caption" Style="opacity: 0.75;">👤 @item.RequesterDisplayName</MudText>
+                    </div>
+
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700; cursor: pointer;"
+                             @onclick="@(() => { if (item.ModelItemId.HasValue) Nav.NavigateTo($"/library/{item.ModelItemId.Value}"); })">
+                        @item.Title
+                    </MudText>
+
+                    @if (item.PrintOrder is not null)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">
+                            🎲 Paket: @item.PrintOrder.Title
+                        </MudText>
+                    }
+
+                    @if (item.PrintBatch is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" Class="mt-1" Href="/batches">
+                            🖨️ @item.PrintBatch.BatchName
+                        </MudChip>
+                    }
+
+                    <div class="d-flex flex-wrap gap-2 mt-2" style="font-size: 0.75rem; opacity: 0.85;">
+                        <span>📏 @item.ScalePercentage.ToString("F0")%</span>
+                        <span>💧 @item.EstimatedTotalVolumeMl.ToString("F1") ml</span>
+                        <span>💶 @item.EstimatedCostEur.ToString("F2") €</span>
+                        @if (item.DueDate.HasValue)
+                        {
+                            <span>📅 @item.DueDate.Value.ToString("dd.MM.")</span>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(item.RequesterNotes))
+                    {
+                        <MudText Typo="Typo.caption" Class="d-block mt-1 pa-1 rounded" Style="background: rgba(255,255,255,0.04); font-style: italic;">
+                            „@item.RequesterNotes“
+                        </MudText>
+                    }
+
+                    <!-- Status-Steuerung & Kommentare -->
+                    <div class="d-flex justify-space-between align-center mt-2 pt-2" style="border-top: 1px solid rgba(255,255,255,0.06);">
+                        <div class="d-flex gap-1">
+                            @if (_currentUser.HasPermission(AppPermissions.QueueManageBatches))
+                            {
+                                var prev = GetPreviousStatus(item.Status);
+                                var next = GetNextStatus(item.Status);
+                                if (prev.HasValue)
+                                {
+                                    <MudTooltip Text="@($"Zurück nach: {NotificationService.GetGermanStatusName(prev.Value)}")">
+                                        <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small"
+                                                       OnClick="@(() => MoveRequestStatusAsync(item, prev.Value))" />
+                                    </MudTooltip>
+                                }
+                                if (next.HasValue)
+                                {
+                                    <MudTooltip Text="@($"Weiter nach: {NotificationService.GetGermanStatusName(next.Value)}")">
+                                        <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Color="Color.Primary"
+                                                       OnClick="@(() => MoveRequestStatusAsync(item, next.Value))" />
+                                    </MudTooltip>
+                                }
+                            }
+                        </div>
+
+                        <div class="d-flex align-center gap-1">
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Comment"
+                                       OnClick="@(() => OpenCommentsAsync(item))">
+                                @item.Comments.Count
+                            </MudButton>
+                            @if (item.Status == PrintRequestStatus.ReadyForPickup && _currentUser.HasPermission(AppPermissions.QueueManageBatches))
+                            {
+                                <MudTooltip Text="Als übergeben archivieren">
+                                    <MudIconButton Icon="@Icons.Material.Filled.DoneAll" Size="Size.Small" Color="Color.Success"
+                                                   OnClick="@(() => MoveRequestStatusAsync(item, PrintRequestStatus.CompletedHandedOver))" />
+                                </MudTooltip>
+                            }
+                        </div>
+                    </div>
+                </MudPaper>
+            }
+        </MudPaper>
+    }
+</div>
+
+<!-- Kommentar-Drawer / Modal für ausgewählten Druckwunsch -->
+@if (_activeCommentRequest is not null)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="9999">
+        <MudPaper Elevation="6" Class="pa-5" Style="width: 480px; max-width: 95vw; border-radius: 14px;">
+            <div class="d-flex justify-space-between align-center mb-3">
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">💬 Rückfragen & Notizen: @_activeCommentRequest.Title</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _activeCommentRequest = null)" />
+            </div>
+
+            <div style="max-height: 280px; overflow-y: auto;" class="mb-3">
+                @if (_activeCommentRequest.Comments.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="opacity: 0.6;">Noch keine Kommentare vorhanden.</MudText>
+                }
+                @foreach (var c in _activeCommentRequest.Comments.OrderBy(x => x.CreatedAt))
+                {
+                    <MudPaper Outlined="true" Class="pa-2 mb-2">
+                        <div class="d-flex justify-space-between">
+                            <MudText Typo="Typo.caption" Style="font-weight: 700;">@c.AuthorDisplayName</MudText>
+                            <MudText Typo="Typo.caption" Style="opacity: 0.6;">@c.CreatedAt.ToLocalTime().ToString("dd.MM. HH:mm")</MudText>
+                        </div>
+                        <MudText Typo="Typo.body2">@c.Message</MudText>
+                    </MudPaper>
+                }
+            </div>
+
+            <div class="d-flex gap-2">
+                <MudTextField @bind-Value="_newCommentText" Placeholder="Nachricht oder Rückfrage schreiben..." Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddCommentAsync">Senden</MudButton>
+            </div>
+        </MudPaper>
+    </MudOverlay>
+}
+
+@code {
+    private record KanbanColDef(PrintRequestStatus Status, string Title, string AccentHex);
+
+    private static readonly KanbanColDef[] BaseColumns =
+    [
+        new(PrintRequestStatus.RequestedOpen, "1. Offen / Gewünscht", "#FFA726"),
+        new(PrintRequestStatus.ScheduledOnPlate, "2. Auf Buildplate", "#9575CD"),
+        new(PrintRequestStatus.Printing, "3. Druckt gerade", "#29B6F6"),
+        new(PrintRequestStatus.PostProcessing, "4. Waschen & Härten", "#26A69A"),
+        new(PrintRequestStatus.ReadyForPickup, "5. Abholbereit", "#66BB6A")
+    ];
+
+    private IEnumerable<KanbanColDef> KanbanColumns => _showArchivedAndRejected
+        ? BaseColumns.Concat([new(PrintRequestStatus.CompletedHandedOver, "6. Übergeben / Archiv", "#78909C")])
+        : BaseColumns;
+
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private List<PrintRequest> _requests = [];
+    private List<PrintOrder> _orders = [];
+    private List<Printer> _printers = [];
+    private List<Material> _materials = [];
+    private List<string> _requesters = [];
+
+    private string? _filterRequester;
+    private int? _filterOrderId;
+    private bool _showArchivedAndRejected;
+
+    private HashSet<int> _selectedOpenRequestIds = [];
+    private bool _showQuickBatchPanel;
+    private string _newBatchName = $"Saturn 4 – Platte ({DateTime.Now:dd.MM.})";
+    private int? _newBatchPrinterId;
+    private int? _newBatchMaterialId;
+
+    private PrintRequest? _activeCommentRequest;
+    private string _newCommentText = string.Empty;
+
+    private IEnumerable<PrintRequest> FilteredRequests => _requests.Where(r =>
+    {
+        if (r.Status == PrintRequestStatus.CartDraft) return false;
+        if (!string.IsNullOrWhiteSpace(_filterRequester) && r.RequesterDisplayName != _filterRequester) return false;
+        if (_filterOrderId.HasValue && r.PrintOrderId != _filterOrderId.Value) return false;
+        return true;
+    });
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        await LoadBoardAsync();
+    }
+
+    private async Task LoadBoardAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _requests = await db.PrintRequests
+            .Include(r => r.PrintOrder)
+            .Include(r => r.PrintBatch)
+            .Include(r => r.Comments)
+            .Where(r => r.Status != PrintRequestStatus.CartDraft)
+            .AsNoTracking()
+            .ToListAsync();
+
+        _orders = await db.PrintOrders.Where(o => o.IsSubmitted).OrderByDescending(o => o.SubmittedAt).AsNoTracking().ToListAsync();
+        _printers = await db.Printers.AsNoTracking().ToListAsync();
+        _materials = await db.Materials.Where(m => m.IsAvailable).AsNoTracking().ToListAsync();
+        _requesters = _requests.Select(r => r.RequesterDisplayName).Distinct().OrderBy(x => x).ToList();
+
+        _newBatchPrinterId ??= _printers.FirstOrDefault()?.Id;
+        _newBatchMaterialId ??= _materials.FirstOrDefault()?.Id;
+    }
+
+    private void ToggleSelectForBatch(int reqId, bool selected)
+    {
+        if (selected) _selectedOpenRequestIds.Add(reqId);
+        else _selectedOpenRequestIds.Remove(reqId);
+    }
+
+    private async Task CreateBatchFromSelectedAsync()
+    {
+        if (_selectedOpenRequestIds.Count == 0) return;
+        var batch = await QueueService.CreateBatchFromRequestsAsync(
+            string.IsNullOrWhiteSpace(_newBatchName) ? "Neue Buildplate" : _newBatchName.Trim(),
+            _newBatchPrinterId,
+            _newBatchMaterialId,
+            _selectedOpenRequestIds.ToList());
+
+        _selectedOpenRequestIds.Clear();
+        _showQuickBatchPanel = false;
+        await LoadBoardAsync();
+        Snackbar.Add($"Buildplate '{batch.BatchName}' erstellt und Wünsche eingeplant!", Severity.Success);
+    }
+
+    private async Task MoveRequestStatusAsync(PrintRequest req, PrintRequestStatus targetStatus)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrintRequests.Include(r => r.ModelItem).FirstOrDefaultAsync(r => r.Id == req.Id);
+        if (entity is null) return;
+
+        entity.Status = targetStatus;
+        entity.UpdatedAt = DateTime.UtcNow;
+        if (targetStatus == PrintRequestStatus.ReadyForPickup && entity.CompletedAt is null)
+        {
+            entity.CompletedAt = DateTime.UtcNow;
+            entity.QuantityCompleted = entity.QuantityRequested;
+            if (entity.ModelItem is not null)
+                entity.ModelItem.PrintCount += entity.QuantityRequested;
+        }
+        await db.SaveChangesAsync();
+
+        await NotificationService.NotifyStatusChangedAsync(entity.Title, entity.RequesterDisplayName, targetStatus);
+        await LoadBoardAsync();
+    }
+
+    private void OpenCommentsAsync(PrintRequest req)
+    {
+        _activeCommentRequest = req;
+    }
+
+    private async Task AddCommentAsync()
+    {
+        if (_activeCommentRequest is null || string.IsNullOrWhiteSpace(_newCommentText)) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.PrintRequestComments.Add(new PrintRequestComment
+        {
+            PrintRequestId = _activeCommentRequest.Id,
+            AuthorUserId = _currentUser.UserId,
+            AuthorDisplayName = _currentUser.DisplayName,
+            Message = _newCommentText.Trim()
+        });
+        await db.SaveChangesAsync();
+        _newCommentText = string.Empty;
+        await LoadBoardAsync();
+        _activeCommentRequest = _requests.FirstOrDefault(r => r.Id == _activeCommentRequest.Id);
+    }
+
+    private async Task OpenNewRequestDialogAsync()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<CreateRequestDialog>("Neuer Druckwunsch", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadBoardAsync();
+        }
+    }
+
+    private static PrintRequestStatus? GetPreviousStatus(PrintRequestStatus s) => s switch
+    {
+        PrintRequestStatus.ScheduledOnPlate => PrintRequestStatus.RequestedOpen,
+        PrintRequestStatus.Printing => PrintRequestStatus.ScheduledOnPlate,
+        PrintRequestStatus.PostProcessing => PrintRequestStatus.Printing,
+        PrintRequestStatus.ReadyForPickup => PrintRequestStatus.PostProcessing,
+        _ => null
+    };
+
+    private static PrintRequestStatus? GetNextStatus(PrintRequestStatus s) => s switch
+    {
+        PrintRequestStatus.RequestedOpen => PrintRequestStatus.ScheduledOnPlate,
+        PrintRequestStatus.ScheduledOnPlate => PrintRequestStatus.Printing,
+        PrintRequestStatus.Printing => PrintRequestStatus.PostProcessing,
+        PrintRequestStatus.PostProcessing => PrintRequestStatus.ReadyForPickup,
+        _ => null
+    };
+}

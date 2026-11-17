@@ -1,0 +1,84 @@
+@page "/login"
+@using Microsoft.AspNetCore.WebUtilities
+@inject NavigationManager Nav
+
+<PageTitle>Anmelden – Druckkammer</PageTitle>
+
+<MudGrid Justify="Justify.Center" Class="mt-6">
+    <MudItem xs="12" sm="8" md="5">
+        <MudPaper Elevation="4" Class="pa-6" Style="border-radius: 16px;">
+            <div class="d-flex flex-column align-center mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing" Color="Color.Primary" Style="font-size: 3.2rem;" />
+                <MudText Typo="Typo.h5" Style="font-weight: 800;" Class="mt-2">DRUCKKAMMER</MudText>
+                <MudText Typo="Typo.body2" Style="opacity: 0.75;">STL-Bibliothek & Tabletop-Druckjobverwaltung</MudText>
+            </div>
+
+            @if (_error == "invalid")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">E-Mail oder Passwort ungültig.</MudAlert>
+            }
+            else if (_error == "unapproved")
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">Dein Account wartet noch auf die Freischaltung durch den Administrator.</MudAlert>
+            }
+            @if (_info == "pending_approval")
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">Registrierung erfolgreich! Sobald der Admin deinen Account freischaltet, kannst du dich anmelden.</MudAlert>
+            }
+
+            <form method="post" action="/auth/login">
+                <MudTextField T="string" Name="email" Label="E-Mail-Adresse" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Value="@("admin@druckkammer.local")" Required="true" Class="mb-3" />
+                <MudTextField T="string" Name="password" Label="Passwort" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Value="@("Druckkammer!2026")" Required="true" Class="mb-4" />
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                           StartIcon="@Icons.Material.Filled.Login">
+                    Anmelden
+                </MudButton>
+            </form>
+
+            <MudDivider Class="my-4" />
+
+            <MudText Typo="Typo.caption" Class="d-block text-center mb-2" Style="opacity: 0.8;">
+                ⚡ Schnell-Login zum Testen der verschiedenen Rollen:
+            </MudText>
+            <div class="d-flex flex-column gap-2">
+                <form method="post" action="/auth/quick-login">
+                    <input type="hidden" name="email" value="admin@druckkammer.local" />
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">
+                        🛠️ Uke (Admin & Drucker-Operator)
+                    </MudButton>
+                </form>
+                <form method="post" action="/auth/quick-login">
+                    <input type="hidden" name="email" value="andre@druckkammer.local" />
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Outlined" Color="Color.Secondary" FullWidth="true" Size="Size.Small">
+                        🎲 Andre (Dungeon Master / Anforderer)
+                    </MudButton>
+                </form>
+                <form method="post" action="/auth/quick-login">
+                    <input type="hidden" name="email" value="marcel@druckkammer.local" />
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Outlined" Color="Color.Warning" FullWidth="true" Size="Size.Small">
+                        📚 Marcel (Abo-Sammler / Bibliotheks-Kurator)
+                    </MudButton>
+                </form>
+            </div>
+
+            <div class="text-center mt-4">
+                <MudLink Href="/register" Typo="Typo.body2">Neu hier? Mit Einladungs-Code registrieren →</MudLink>
+            </div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string? _error;
+    private string? _info;
+
+    protected override void OnInitialized()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("error", out var err)) _error = err.ToString();
+        if (query.TryGetValue("info", out var inf)) _info = inf.ToString();
+    }
+}

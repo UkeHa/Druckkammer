@@ -1,0 +1,259 @@
+@page "/inventory"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserContextService UserContext
+@inject ISnackbar Snackbar
+
+<PageTitle>Drucker, Resins & Kaffeekasse – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">Werkstatt, Materialien & Kaffeekasse</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Verwalte deine Resin-/FDM-Drucker, vorhandene Harze/Filamente und die freundschaftliche Unkosten-Übersicht.
+        </MudText>
+    </div>
+</div>
+
+<MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+    <!-- Tab 1: Materialien (Resins & Filamente) -->
+    <MudTabPanel Text="🧪 Resins & Filamente" Icon="@Icons.Material.Filled.ColorLens">
+        @if (_currentUser.HasPermission(AppPermissions.InventoryManage))
+        {
+            <MudPaper Elevation="2" Class="pa-4 mb-4">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Neues Resin / Filament eintragen</MudText>
+                <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+                    <MudItem xs="12" sm="2">
+                        <MudTextField @bind-Value="_matBrand" Label="Hersteller (z.B. Sunlu)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_matName" Label="Bezeichnung (z.B. ABS-Like Pro 2)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudTextField @bind-Value="_matColorName" Label="Farbe" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudNumericField T="decimal" @bind-Value="_matPrice" Label="Preis pro L / kg (€)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudNumericField T="double" @bind-Value="_matStock" Label="Bestand (ml / g)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="1">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="AddMaterialAsync">+</MudButton>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+
+        <MudGrid Spacing="3">
+            @foreach (var mat in _materials)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudPaper Elevation="2" Class="pa-4">
+                        <div class="d-flex justify-space-between align-center mb-2">
+                            <div class="d-flex align-center gap-2">
+                                <div style="@($"width: 22px; height: 22px; border-radius: 50%; background: {mat.ColorHex}; border: 2px solid rgba(255,255,255,0.4);")"></div>
+                                <div>
+                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@mat.Brand @mat.Name</MudText>
+                                    <MudText Typo="Typo.caption" Style="opacity: 0.75;">@mat.MaterialType · @mat.ColorName</MudText>
+                                </div>
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Color="@(mat.Technology == PrintingTechnology.ResinSLA ? Color.Secondary : Color.Info)">
+                                @(mat.Technology == PrintingTechnology.ResinSLA ? "Resin SLA" : "Filament FDM")
+                            </MudChip>
+                        </div>
+
+                        <div class="d-flex justify-space-between align-center mt-3">
+                            <MudText Typo="Typo.body2">💶 <strong>@mat.PricePerLiterOrKg.ToString("F2") €</strong> / @(mat.Technology == PrintingTechnology.ResinSLA ? "Liter" : "kg")</MudText>
+                            <MudText Typo="Typo.body2">📦 Bestand: <strong>@mat.StockAmountMlOrG.ToString("F0") @(mat.Technology == PrintingTechnology.ResinSLA ? "ml" : "g")</strong></MudText>
+                        </div>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudTabPanel>
+
+    <!-- Tab 2: Drucker -->
+    <MudTabPanel Text="🖨️ 3D-Drucker" Icon="@Icons.Material.Filled.Print">
+        @if (_currentUser.HasPermission(AppPermissions.InventoryManage))
+        {
+            <MudPaper Elevation="2" Class="pa-4 mb-4">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Neuen Drucker anlegen</MudText>
+                <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_printerName" Label="Spitzname" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_printerModel" Label="Modell (z.B. Elegoo Mars 5 Ultra)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudSelect T="PrintingTechnology" @bind-Value="_printerTech" Label="Verfahren" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            <MudSelectItem Value="PrintingTechnology.ResinSLA">Resin SLA</MudSelectItem>
+                            <MudSelectItem Value="PrintingTechnology.FilamentFDM">Filament FDM</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudNumericField T="double" @bind-Value="_printerX" Label="Bauraum X (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="AddPrinterAsync">Hinzufügen</MudButton>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+
+        <MudGrid Spacing="3">
+            @foreach (var p in _printers)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudPaper Elevation="2" Class="pa-4">
+                        <div class="d-flex justify-space-between align-center mb-2">
+                            <div>
+                                <MudText Typo="Typo.h6" Style="font-weight: 700;">@p.Name</MudText>
+                                <MudText Typo="Typo.caption" Style="opacity: 0.8;">@p.ManufacturerModel · Bauraum: @p.BuildVolumeXMm×@p.BuildVolumeYMm×@p.BuildVolumeZMm mm</MudText>
+                            </div>
+                            <MudChip T="string" Color="@(p.Status == PrinterStatus.IdleReady ? Color.Success : Color.Info)" Size="Size.Small">
+                                @p.Status
+                            </MudChip>
+                        </div>
+                        <MudText Typo="Typo.body2" Style="opacity: 0.8;">@p.Notes</MudText>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudTabPanel>
+
+    <!-- Tab 3: Kaffeekasse / Unkosten-Übersicht -->
+    <MudTabPanel Text="☕ Kaffeekasse & Unkosten" Icon="@Icons.Material.Filled.Savings">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-1">Freundschaftliche Material- & Unkosten-Übersicht</MudText>
+            <MudText Typo="Typo.body2" Class="mb-4" Style="opacity: 0.75;">
+                Berechnet aus dem tatsächlichen STL-Volumen (inkl. Support-/IPA-Aufschlag) und dem hinterlegten Resin-/Filamentpreis.
+            </MudText>
+
+            <MudSimpleTable Dense="false" Hover="true" Striped="true">
+                <thead>
+                    <tr>
+                        <th>Mitspieler / Anforderer</th>
+                        <th>Aufträge (Figuren)</th>
+                        <th>Gesamtvolumen</th>
+                        <th>Offener Kaffeekassen-Betrag</th>
+                        <th>Bereits ausgeglichen</th>
+                        <th style="text-align: right;">Aktion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var group in _requests.Where(r => r.Status != PrintRequestStatus.CartDraft).GroupBy(r => r.RequesterDisplayName))
+                    {
+                        int totalMinis = group.Sum(x => x.QuantityRequested);
+                        double totalMl = group.Sum(x => x.EstimatedTotalVolumeMl);
+                        decimal unsettledEur = group.Where(x => !x.IsCostSettled).Sum(x => x.ActualCostEur ?? x.EstimatedCostEur);
+                        decimal settledEur = group.Where(x => x.IsCostSettled).Sum(x => x.ActualCostEur ?? x.EstimatedCostEur);
+
+                        <tr>
+                            <td><strong>👤 @group.Key</strong></td>
+                            <td>@group.Count() Wünsche (@totalMinis Figuren)</td>
+                            <td>💧 @totalMl.ToString("F1") ml</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small" Color="@(unsettledEur > 0 ? Color.Warning : Color.Success)">
+                                    @unsettledEur.ToString("F2") € offen
+                                </MudChip>
+                            </td>
+                            <td>@settledEur.ToString("F2") €</td>
+                            <td style="text-align: right;">
+                                @if (unsettledEur > 0 && _currentUser.HasPermission(AppPermissions.InventoryManage))
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.Check"
+                                               OnClick="@(() => MarkUserCostsSettledAsync(group.Key))">
+                                        Als ausgeglichen markieren
+                                    </MudButton>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private List<Material> _materials = [];
+    private List<Printer> _printers = [];
+    private List<PrintRequest> _requests = [];
+
+    private string _matBrand = "Sunlu";
+    private string _matName = string.Empty;
+    private string _matColorName = "Grau";
+    private decimal _matPrice = 22.90m;
+    private double _matStock = 1000;
+
+    private string _printerName = string.Empty;
+    private string _printerModel = string.Empty;
+    private PrintingTechnology _printerTech = PrintingTechnology.ResinSLA;
+    private double _printerX = 218;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        await LoadInventoryAsync();
+    }
+
+    private async Task LoadInventoryAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _materials = await db.Materials.OrderBy(m => m.Technology).ThenBy(m => m.Name).AsNoTracking().ToListAsync();
+        _printers = await db.Printers.AsNoTracking().ToListAsync();
+        _requests = await db.PrintRequests.AsNoTracking().ToListAsync();
+    }
+
+    private async Task AddMaterialAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_matName)) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Materials.Add(new Material
+        {
+            Brand = _matBrand.Trim(),
+            Name = _matName.Trim(),
+            ColorName = _matColorName.Trim(),
+            PricePerLiterOrKg = _matPrice,
+            StockAmountMlOrG = _matStock
+        });
+        await db.SaveChangesAsync();
+        _matName = string.Empty;
+        await LoadInventoryAsync();
+        Snackbar.Add("Material hinzugefügt!", Severity.Success);
+    }
+
+    private async Task AddPrinterAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_printerName)) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Printers.Add(new Printer
+        {
+            Name = _printerName.Trim(),
+            ManufacturerModel = _printerModel.Trim(),
+            Technology = _printerTech,
+            BuildVolumeXMm = _printerX,
+            BuildVolumeYMm = 122,
+            BuildVolumeZMm = 220
+        });
+        await db.SaveChangesAsync();
+        _printerName = string.Empty;
+        await LoadInventoryAsync();
+        Snackbar.Add("Drucker hinzugefügt!", Severity.Success);
+    }
+
+    private async Task MarkUserCostsSettledAsync(string requesterDisplayName)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var items = await db.PrintRequests.Where(r => r.RequesterDisplayName == requesterDisplayName && !r.IsCostSettled).ToListAsync();
+        foreach (var item in items)
+            item.IsCostSettled = true;
+        await db.SaveChangesAsync();
+        await LoadInventoryAsync();
+        Snackbar.Add($"Kaffeekasse für {requesterDisplayName} als ausgeglichen markiert!", Severity.Success);
+    }
+}

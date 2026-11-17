@@ -1,0 +1,50 @@
+<MudNavMenu Class="pt-2">
+    <MudText Typo="Typo.overline" Class="px-4 py-1" Style="opacity: 0.6;">ÜBERSICHT & COMMUNITY</MudText>
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+        Dashboard & Hall of Fame
+    </MudNavLink>
+
+    <MudDivider Class="my-2" />
+    <MudText Typo="Typo.overline" Class="px-4 py-1" Style="opacity: 0.6;">3D-BIBLIOTHEK & ABOS</MudText>
+    <MudNavLink Href="/library" Icon="@Icons.Material.Filled.ViewInAr">
+        Modell-Katalog (STLs)
+    </MudNavLink>
+    <MudNavLink Href="/collections" Icon="@Icons.Material.Filled.CollectionsBookmark">
+        Collections & Abo-Bundles
+    </MudNavLink>
+    <MudNavLink Href="/makes" Icon="@Icons.Material.Filled.PhotoLibrary">
+        Makes & Bemal-Galerie
+    </MudNavLink>
+
+    <MudDivider Class="my-2" />
+    <MudText Typo="Typo.overline" Class="px-4 py-1" Style="opacity: 0.6;">DRUCKJOB-VERWALTUNG</MudText>
+    <MudNavLink Href="/kanban" Icon="@Icons.Material.Filled.ViewKanban">
+        Kanban-Board & Queue
+    </MudNavLink>
+    <MudNavLink Href="/batches" Icon="@Icons.Material.Filled.Layers">
+        Buildplates & Druckläufe
+    </MudNavLink>
+    <MudNavLink Href="/cart" Icon="@Icons.Material.Filled.ShoppingBag">
+        Session-Warenkorb @(CartCount > 0 ? $"({CartCount})" : "")
+    </MudNavLink>
+
+    <MudDivider Class="my-2" />
+    <MudText Typo="Typo.overline" Class="px-4 py-1" Style="opacity: 0.6;">WERKSTATT & KAFFEEKASSE</MudText>
+    <MudNavLink Href="/inventory" Icon="@Icons.Material.Filled.Print">
+        Drucker, Resins & Kosten
+    </MudNavLink>
+
+    @if (CurrentUser.HasPermission(AppPermissions.SystemAdmin) || CurrentUser.HasPermission(AppPermissions.LibraryScanFolders))
+    {
+        <MudDivider Class="my-2" />
+        <MudText Typo="Typo.overline" Class="px-4 py-1" Style="opacity: 0.6;">ADMINISTRATION</MudText>
+        <MudNavLink Href="/admin" Icon="@Icons.Material.Filled.AdminPanelSettings">
+            Benutzer, Scanner & System
+        </MudNavLink>
+    }
+</MudNavMenu>
+
+@code {
+    [Parameter] public CurrentUserInfo CurrentUser { get; set; } = default!;
+    [Parameter] public int CartCount { get; set; }
+}

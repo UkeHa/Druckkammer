@@ -1,0 +1,462 @@
+@using Druckkammer.Web.Data
+@using Druckkammer.Web.Data.Entities
+@using Druckkammer.Web.Services
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject PrintQueueService QueueService
+@inject ManagedStorageService StorageService
+@inject OpenGraphService OpenGraphService
+@inject UserContextService UserContext
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.AddShoppingCart" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">
+                @(PreselectedModel is not null ? $"Druckwunsch: {PreselectedModel.Title}" : "Neuen Druckwunsch / Direkt-Upload anlegen")
+            </MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (PreselectedModel is null)
+        {
+            <MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-3" @bind-ActivePanelIndex="_sourceTabIndex">
+                <MudTabPanel Text="Direkt-Upload (STL/ZIP)" Icon="@Icons.Material.Filled.UploadFile">
+                    <MudPaper Outlined="true" Class="pa-3 mb-3" Style="border-style: dashed;">
+                        <div class="d-flex flex-column align-center gap-2">
+                            <MudFileUpload T="IBrowserFile" FilesChanged="OnDirectFileUploadedAsync" Accept=".stl,.obj,.3mf,.lys,.ctb,.zip">
+                                <ActivatorContent>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CloudUpload">
+                                        3D-Druckdatei auswählen (.stl, .3mf, .obj, .lys)
+                                    </MudButton>
+                                </ActivatorContent>
+                            </MudFileUpload>
+                            @if (!string.IsNullOrWhiteSpace(_uploadedFileName))
+                            {
+                                <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle">
+                                    @_uploadedFileName (@_baseVolumeCm3.ToString("F1") ml | @_nativeHeightMm.ToString("F1") mm Höhe)
+                                </MudChip>
+                            }
+                            <MudCheckBox T="bool" @bind-Value="_alsoAddToLibrary" Color="Color.Primary" Dense="true"
+                                         Label="Hochgeladene Datei gleichzeitig als neues Modell in die gemeinsame Bibliothek aufnehmen" />
+                        </div>
+                    </MudPaper>
+                </MudTabPanel>
+
+                <MudTabPanel Text="Link (Printables / MMF / Thingiverse)" Icon="@Icons.Material.Filled.Link">
+                    <div class="d-flex gap-2 align-center mb-3">
+                        <MudTextField @bind-Value="_externalUrl" Label="URL zum 3D-Modell" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Placeholder="https://www.myminifactory.com/object/... oder https://www.printables.com/model/..." FullWidth="true" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Info" OnClick="FetchOpenGraphAsync" Disabled="_isFetchingOg"
+                                   StartIcon="@Icons.Material.Filled.AutoFixHigh">
+                            @(_isFetchingOg ? "Lädt..." : "Metadaten laden")
+                        </MudButton>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_thumbnailUrlOrPath) && _thumbnailUrlOrPath.StartsWith("http"))
+                    {
+                        <div class="d-flex align-center gap-3 mb-3 pa-2 rounded" style="background: rgba(255,255,255,0.04);">
+                            <img src="@_thumbnailUrlOrPath" alt="Preview" style="width: 64px; height: 64px; object-fit: cover; border-radius: 6px;" />
+                            <MudText Typo="Typo.caption">OpenGraph-Vorschaubild & Titel automatisch übernommen!</MudText>
+                        </div>
+                    }
+                </MudTabPanel>
+            </MudTabs>
+        }
+
+        <MudGrid Spacing="2" Class="mt-1">
+            <MudItem xs="12" sm="8">
+                <MudTextField @bind-Value="_title" Label="Bezeichnung des Druckwunsches" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudNumericField T="int" @bind-Value="_quantity" Min="1" Max="100" Label="Stückzahl" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+
+            @if (PreselectedModel is not null && PreselectedModel.Files.Count > 0)
+            {
+                <MudItem xs="12">
+                    <MudSelect T="int?" Value="_selectedFileId" ValueChanged="OnSelectedFileVariantChanged"
+                               Label="Gewünschte Datei-Variante / Pose" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var f in PreselectedModel.Files.Where(x => x.Category is ModelFileCategory.PresupportedMesh or ModelFileCategory.UnsupportedMesh or ModelFileCategory.BaseMesh or ModelFileCategory.PartMesh or ModelFileCategory.SlicerProject))
+                        {
+                            <MudSelectItem T="int?" Value="@f.Id">
+                                @f.VariantLabel — @f.FileName (@(f.VolumeCm3 > 0 ? $"{f.VolumeCm3:F1} ml" : "Slicer"))
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            }
+
+            <!-- Integrierter Maßstabs-Umrechner -->
+            <MudItem xs="12">
+                <MudPaper Outlined="true" Class="pa-3" Style="background: rgba(126, 87, 194, 0.06);">
+                    <div class="d-flex align-center justify-space-between mb-2">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Straighten" Size="Size.Small" Color="Color.Primary" />
+                            <MudText Typo="Typo.subtitle2">Integrierter Tabletop-Maßstabs-Umrechner</MudText>
+                        </div>
+                        <div class="d-flex flex-wrap gap-1">
+                            <MudChip T="string" Size="Size.Small" OnClick="@(() => ApplyScalePreset(100.0))" Color="@(Math.Abs(_scalePct - 100.0) < 0.2 ? Color.Primary : Color.Default)">100% (Original)</MudChip>
+                            <MudChip T="string" Size="Size.Small" OnClick="@(() => ApplyTabletopConversion(28, 32))">28mm → 32mm (114.3%)</MudChip>
+                            <MudChip T="string" Size="Size.Small" OnClick="@(() => ApplyTabletopConversion(32, 28))">32mm → 28mm (87.5%)</MudChip>
+                            <MudChip T="string" Size="Size.Small" OnClick="@(() => ApplyTabletopConversion(32, 54))">32mm → 54mm (168.8%)</MudChip>
+                            <MudChip T="string" Size="Size.Small" OnClick="@(() => ApplyTabletopConversion(32, 75))">32mm → 75mm (234.4%)</MudChip>
+                        </div>
+                    </div>
+
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="4">
+                            <MudNumericField T="double" Value="_scalePct" ValueChanged="OnScalePercentageChanged"
+                                             Min="10" Max="500" Step="2.5" Label="Skalierung (%)" Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.End" AdornmentText="%" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudNumericField T="double" Value="_targetHeightMm" ValueChanged="OnTargetHeightChanged"
+                                             Min="5" Max="400" Step="1" Label="Zielhöhe (Z in mm)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                             HelperText="@(_nativeHeightMm > 0 ? $"Originalhöhe: {_nativeHeightMm:F1} mm" : "Maßstab frei wählbar")" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <div class="d-flex flex-column justify-center" style="height: 100%;">
+                                <MudText Typo="Typo.caption" Style="color: #90A4AE;">Kubischer Volumen-Faktor:</MudText>
+                                <MudText Typo="Typo.body2" Style="font-weight: 600;">
+                                    @((Math.Pow(_scalePct / 100.0, 3)).ToString("F2"))x Volumen (@EstimatedTotalVolumeMl.ToString("F1") ml inkl. Supports)
+                                </MudText>
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" Value="_preferredMaterialId" ValueChanged="OnMaterialChanged"
+                           Label="Gewünschtes Material / Resin" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var mat in _materials)
+                    {
+                        <MudSelectItem T="int?" Value="@mat.Id">
+                            @mat.Brand @mat.Name (@mat.ColorName — @mat.PricePerLiterOrKg.ToString("F2") €/L)
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" sm="3">
+                <MudSelect T="RequestPriority" @bind-Value="_priority" Label="Dringlichkeit" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="RequestPriority.Low">Niedrig (Wenn mal Platz ist)</MudSelectItem>
+                    <MudSelectItem Value="RequestPriority.Normal">Normal</MudSelectItem>
+                    <MudSelectItem Value="RequestPriority.HighSessionUrgent">🔥 Nächste D&D-Session!</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" sm="3">
+                <MudDatePicker @bind-Date="_dueDate" Label="Wunschtermin" Variant="Variant.Outlined" Margin="Margin.Dense" Editable="true" />
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_requesterNotes" Label="Notizen für den Drucker-Operator (z.B. Aushöhlen, Base weglassen, Posen-Wunsch)"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" />
+            </MudItem>
+
+            <!-- Live-Kostenschätzung -->
+            <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Icon="@Icons.Material.Filled.Calculate">
+                    <div class="d-flex flex-wrap justify-space-between align-center w-100">
+                        <span>
+                            <strong>Vorab-Schätzung (inkl. +25% Supports):</strong>
+                            @(_quantity)x Modell à @((_baseVolumeCm3 * Math.Pow(_scalePct / 100.0, 3)).ToString("F1")) ml =
+                            <strong>@EstimatedTotalVolumeMl.ToString("F1") ml</strong>
+                        </span>
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small">
+                            Geschätzte Materialkosten: @EstimatedCostEur.ToString("F2") €
+                        </MudChip>
+                    </div>
+                </MudAlert>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">Abbrechen</MudButton>
+        <MudButton Color="Color.Secondary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ShoppingBag"
+                   OnClick="@(() => SubmitAsync(addToCart: true))" Disabled="_isSaving">
+            In Session-Warenkorb legen
+        </MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Send"
+                   OnClick="@(() => SubmitAsync(addToCart: false))" Disabled="_isSaving">
+            Sofort ans Kanban-Board senden
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ModelItem? PreselectedModel { get; set; }
+
+    private int _sourceTabIndex;
+    private string _title = string.Empty;
+    private int _quantity = 1;
+    private int? _selectedFileId;
+    private double _scalePct = 100.0;
+    private double _nativeHeightMm = 35.0;
+    private double _targetHeightMm = 35.0;
+    private double _baseVolumeCm3 = 6.5;
+
+    private int? _preferredMaterialId;
+    private PrintingTechnology _preferredTech = PrintingTechnology.ResinSLA;
+    private RequestPriority _priority = RequestPriority.Normal;
+    private DateTime? _dueDate = DateTime.Today.AddDays(7);
+    private string _requesterNotes = string.Empty;
+
+    private string? _uploadedRelativePath;
+    private string? _uploadedFileName;
+    private bool _alsoAddToLibrary = true;
+
+    private string _externalUrl = string.Empty;
+    private string? _thumbnailUrlOrPath;
+    private bool _isFetchingOg;
+    private bool _isSaving;
+
+    private List<Material> _materials = [];
+
+    private double EstimatedTotalVolumeMl =>
+        StlAnalysisService.CalculateEstimatedTotalVolumeMl(_baseVolumeCm3, _quantity, _scalePct);
+
+    private decimal EstimatedCostEur
+    {
+        get
+        {
+            var mat = _materials.FirstOrDefault(m => m.Id == _preferredMaterialId);
+            decimal price = mat?.PricePerLiterOrKg ?? 24.90m;
+            double density = mat?.DensityGPerCm3 ?? 1.15;
+            return StlAnalysisService.CalculateEstimatedMaterialCostEur(EstimatedTotalVolumeMl, price, density, _preferredTech);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _materials = await db.Materials.Where(m => m.IsAvailable).OrderBy(m => m.Technology).ThenBy(m => m.Name).ToListAsync();
+        _preferredMaterialId = _materials.FirstOrDefault()?.Id;
+
+        if (PreselectedModel is not null)
+        {
+            _title = PreselectedModel.Title;
+            _baseVolumeCm3 = PreselectedModel.EstimatedVolumeCm3 > 0 ? PreselectedModel.EstimatedVolumeCm3 : 6.5;
+            _nativeHeightMm = PreselectedModel.BoundingBoxZMm > 0 ? PreselectedModel.BoundingBoxZMm : 36.0;
+            _targetHeightMm = _nativeHeightMm;
+            _preferredTech = PreselectedModel.RecommendedTech == PrintingTechnology.FilamentFDM ? PrintingTechnology.FilamentFDM : PrintingTechnology.ResinSLA;
+            _thumbnailUrlOrPath = PreselectedModel.ThumbnailPath;
+
+            var preferredFile = PreselectedModel.Files
+                .OrderByDescending(f => f.Category == ModelFileCategory.PresupportedMesh)
+                .FirstOrDefault(f => f.Category is ModelFileCategory.PresupportedMesh or ModelFileCategory.UnsupportedMesh);
+            if (preferredFile is not null)
+            {
+                _selectedFileId = preferredFile.Id;
+                if (preferredFile.VolumeCm3 > 0) _baseVolumeCm3 = preferredFile.VolumeCm3;
+                if (preferredFile.DimZMm > 0)
+                {
+                    _nativeHeightMm = preferredFile.DimZMm;
+                    _targetHeightMm = _nativeHeightMm;
+                }
+            }
+        }
+    }
+
+    private void OnSelectedFileVariantChanged(int? fileId)
+    {
+        _selectedFileId = fileId;
+        var file = PreselectedModel?.Files.FirstOrDefault(f => f.Id == fileId);
+        if (file is not null)
+        {
+            if (file.VolumeCm3 > 0) _baseVolumeCm3 = file.VolumeCm3;
+            if (file.DimZMm > 0)
+            {
+                _nativeHeightMm = file.DimZMm;
+                _targetHeightMm = Math.Round(_nativeHeightMm * (_scalePct / 100.0), 1);
+            }
+        }
+    }
+
+    private void ApplyScalePreset(double pct)
+    {
+        _scalePct = pct;
+        if (_nativeHeightMm > 0)
+            _targetHeightMm = Math.Round(_nativeHeightMm * (_scalePct / 100.0), 1);
+    }
+
+    private void ApplyTabletopConversion(double fromMm, double toMm)
+    {
+        _scalePct = StlAnalysisService.ConvertTabletopScalePercentage(fromMm, toMm);
+        if (_nativeHeightMm > 0)
+            _targetHeightMm = Math.Round(_nativeHeightMm * (_scalePct / 100.0), 1);
+    }
+
+    private void OnScalePercentageChanged(double newPct)
+    {
+        _scalePct = Math.Clamp(newPct, 5, 1000);
+        if (_nativeHeightMm > 0)
+            _targetHeightMm = Math.Round(_nativeHeightMm * (_scalePct / 100.0), 1);
+    }
+
+    private void OnTargetHeightChanged(double newHeightMm)
+    {
+        _targetHeightMm = Math.Max(1, newHeightMm);
+        if (_nativeHeightMm > 0)
+            _scalePct = StlAnalysisService.CalculateScaleFromTargetHeightPercentage(_nativeHeightMm, _targetHeightMm);
+    }
+
+    private void OnMaterialChanged(int? matId)
+    {
+        _preferredMaterialId = matId;
+        var mat = _materials.FirstOrDefault(m => m.Id == matId);
+        if (mat is not null)
+            _preferredTech = mat.Technology;
+    }
+
+    private async Task OnDirectFileUploadedAsync(IBrowserFile? file)
+    {
+        if (file is null) return;
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 250 * 1024 * 1024);
+            var stored = await StorageService.StoreModelFileStreamAsync(
+                stream,
+                file.Name,
+                "Direkt-Upload",
+                "User-Requests",
+                string.IsNullOrWhiteSpace(_title) ? Path.GetFileNameWithoutExtension(file.Name) : _title,
+                checkDuplicateInDb: false);
+
+            _uploadedRelativePath = stored.RelativeStoragePath;
+            _uploadedFileName = file.Name;
+            if (string.IsNullOrWhiteSpace(_title))
+                _title = Path.GetFileNameWithoutExtension(file.Name).Replace('_', ' ').Replace('-', ' ');
+
+            if (stored.MeshAnalysis is { IsValid: true } mesh)
+            {
+                _baseVolumeCm3 = mesh.VolumeCm3 > 0 ? mesh.VolumeCm3 : 6.0;
+                if (mesh.DimZMm > 0)
+                {
+                    _nativeHeightMm = mesh.DimZMm;
+                    _targetHeightMm = Math.Round(_nativeHeightMm * (_scalePct / 100.0), 1);
+                }
+            }
+            Snackbar.Add($"Datei '{file.Name}' analysiert ({_baseVolumeCm3:F1} ml)!", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload-Fehler: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task FetchOpenGraphAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_externalUrl)) return;
+        _isFetchingOg = true;
+        try
+        {
+            var meta = await OpenGraphService.FetchMetadataAsync(_externalUrl);
+            if (meta.IsSuccess)
+            {
+                if (!string.IsNullOrWhiteSpace(meta.Title))
+                    _title = meta.Title;
+                if (!string.IsNullOrWhiteSpace(meta.ImageUrl))
+                    _thumbnailUrlOrPath = meta.ImageUrl;
+                if (string.IsNullOrWhiteSpace(_requesterNotes) && !string.IsNullOrWhiteSpace(meta.Description))
+                    _requesterNotes = meta.Description.Length > 250 ? meta.Description[..250] + "..." : meta.Description;
+                Snackbar.Add($"Metadaten von {meta.SiteName} übernommen!", Severity.Success);
+            }
+        }
+        finally
+        {
+            _isFetchingOg = false;
+        }
+    }
+
+    private async Task SubmitAsync(bool addToCart)
+    {
+        if (string.IsNullOrWhiteSpace(_title))
+        {
+            Snackbar.Add("Bitte gib einen Titel für den Druckwunsch an.", Severity.Warning);
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            var user = await UserContext.GetCurrentUserAsync();
+            int? modelItemId = PreselectedModel?.Id;
+
+            // Optional: Direkt-Upload auch als neues Modell in die Bibliothek aufnehmen
+            if (!modelItemId.HasValue && _alsoAddToLibrary && !string.IsNullOrWhiteSpace(_uploadedRelativePath) && !string.IsNullOrWhiteSpace(_uploadedFileName))
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var newModel = new ModelItem
+                {
+                    Title = _title.Trim(),
+                    Slug = ManagedStorageService.Slugify(_title),
+                    CreatorStudio = $"Upload von {user.DisplayName}",
+                    EstimatedVolumeCm3 = _baseVolumeCm3,
+                    BoundingBoxZMm = _nativeHeightMm,
+                    ScaleSize = TabletopScaleSize.SmallMedium,
+                    CreatedByUserId = user.UserId,
+                    Files =
+                    [
+                        new ModelFile
+                        {
+                            FileName = _uploadedFileName,
+                            RelativeStoragePath = _uploadedRelativePath,
+                            FileExtension = Path.GetExtension(_uploadedFileName).ToLowerInvariant(),
+                            Sha256Hash = Guid.NewGuid().ToString("N"),
+                            Category = ModelFileCategory.UnsupportedMesh,
+                            VariantLabel = "Direkt-Upload",
+                            VolumeCm3 = _baseVolumeCm3,
+                            DimZMm = _nativeHeightMm
+                        }
+                    ]
+                };
+                db.ModelItems.Add(newModel);
+                await db.SaveChangesAsync();
+                modelItemId = newModel.Id;
+                _selectedFileId = newModel.Files[0].Id;
+            }
+
+            var request = new PrintRequest
+            {
+                Title = _title.Trim(),
+                RequesterUserId = string.IsNullOrWhiteSpace(user.UserId) ? "guest" : user.UserId,
+                RequesterDisplayName = user.DisplayName,
+                ModelItemId = modelItemId,
+                SelectedModelFileId = _selectedFileId,
+                DirectUploadFilePath = _uploadedRelativePath,
+                DirectUploadFileName = _uploadedFileName,
+                ExternalModelUrl = string.IsNullOrWhiteSpace(_externalUrl) ? null : _externalUrl.Trim(),
+                ThumbnailUrlOrPath = _thumbnailUrlOrPath,
+                QuantityRequested = _quantity,
+                ScalePercentage = _scalePct,
+                TargetHeightMm = _targetHeightMm,
+                PreferredTech = _preferredTech,
+                PreferredMaterialId = _preferredMaterialId,
+                Priority = _priority,
+                DueDate = _dueDate,
+                BaseUnitVolumeCm3 = _baseVolumeCm3,
+                RequesterNotes = _requesterNotes.Trim()
+            };
+
+            await QueueService.CreatePrintRequestAsync(request, addToSessionCart: addToCart);
+
+            Snackbar.Add(
+                addToCart
+                    ? $"'{request.Title}' ({request.QuantityRequested}x) in deinen Session-Warenkorb gelegt!"
+                    : $"Druckwunsch '{request.Title}' ({request.QuantityRequested}x) ins Kanban-Board eingereiht!",
+                Severity.Success);
+
+            MudDialog.Close(DialogResult.Ok(request));
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

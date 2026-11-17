@@ -1,0 +1,307 @@
+@page "/"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+
+<PageTitle>Dashboard & Hall of Fame – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">Willkommen in der Druckkammer</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Gemeinsame 3D-Modellbibliothek, Session-Warenkorb & Resin/FDM-Druckjobverwaltung
+        </MudText>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ViewInAr" Href="/library">
+            Bibliothek (@_totalModels)
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.ViewKanban" Href="/kanban">
+            Kanban-Board
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddShoppingCart" OnClick="OpenNewRequestAsync">
+            Druckwunsch einreichen
+        </MudButton>
+    </div>
+</div>
+
+<!-- KPI Cards -->
+<MudGrid Spacing="3" Class="mb-4">
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Elevation="2" Class="pa-4 d-flex align-center justify-space-between" Style="border-left: 4px solid #9575CD;">
+            <div>
+                <MudText Typo="Typo.caption" Style="opacity: 0.7;">3D-BIBLIOTHEK</MudText>
+                <MudText Typo="Typo.h4" Style="font-weight: 800;">@_totalModels</MudText>
+                <MudText Typo="Typo.caption">@_totalCollections Collections · @_totalFiles Dateien</MudText>
+            </div>
+            <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Color="Color.Primary" Style="font-size: 2.6rem; opacity: 0.85;" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Elevation="2" Class="pa-4 d-flex align-center justify-space-between" Style="border-left: 4px solid #FFA726;">
+            <div>
+                <MudText Typo="Typo.caption" Style="opacity: 0.7;">OFFENE WÜNSCHE (QUEUE)</MudText>
+                <MudText Typo="Typo.h4" Style="font-weight: 800;">@_openMinisCount <span style="font-size: 1rem; font-weight: 400;">Minis</span></MudText>
+                <MudText Typo="Typo.caption">ca. @_openResinVolumeMl.ToString("F1") ml Resin wartend</MudText>
+            </div>
+            <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" Style="font-size: 2.6rem; opacity: 0.85;" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Elevation="2" Class="pa-4 d-flex align-center justify-space-between" Style="border-left: 4px solid #29B6F6;">
+            <div>
+                <MudText Typo="Typo.caption" Style="opacity: 0.7;">IM DRUCK / ABHOLBEREIT</MudText>
+                <MudText Typo="Typo.h4" Style="font-weight: 800;">@_activePrintingCount / @_readyForPickupCount</MudText>
+                <MudText Typo="Typo.caption">@_activeBatchesCount aktive Buildplate(s)</MudText>
+            </div>
+            <MudIcon Icon="@Icons.Material.Filled.Print" Color="Color.Info" Style="font-size: 2.6rem; opacity: 0.85;" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Elevation="2" Class="pa-4 d-flex align-center justify-space-between" Style="border-left: 4px solid #66BB6A;">
+            <div>
+                <MudText Typo="Typo.caption" Style="opacity: 0.7;">HALL OF FAME (GESAMT)</MudText>
+                <MudText Typo="Typo.h4" Style="font-weight: 800;">@_totalPrintedMinis <span style="font-size: 1rem; font-weight: 400;">gedruckt</span></MudText>
+                <MudText Typo="Typo.caption">@((_totalConsumedMl / 1000.0).ToString("F2")) Liter Material verdruckt</MudText>
+            </div>
+            <MudIcon Icon="@Icons.Material.Filled.EmojiEvents" Color="Color.Success" Style="font-size: 2.6rem; opacity: 0.85;" />
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<!-- Resin Buildplate Fill Indicator ("Lohnt es sich schon, den Resindrucker anzuwerfen?") -->
+<MudPaper Elevation="2" Class="pa-4 mb-4" Style="background: linear-gradient(90deg, rgba(149,117,205,0.14) 0%, rgba(38,166,154,0.10) 100%); border: 1px solid rgba(149,117,205,0.3);">
+    <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-2">
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Secondary" />
+            <div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">
+                    Resin-Warteschlangen-Indikator: @GetPlateFillRecommendation()
+                </MudText>
+                <MudText Typo="Typo.caption" Style="opacity: 0.8;">
+                    Aktuell warten <strong>@_openMinisCount Figuren (@_openResinVolumeMl.ToString("F1") ml)</strong> im Backlog auf eine Buildplate (Richtwert volle Platte: ~50 ml / 6–8 Figuren).
+                </MudText>
+            </div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.BuildCircle" Href="/batches">
+            Zur Buildplate-Planung
+        </MudButton>
+    </div>
+    <MudProgressLinear Color="@(_plateFillPercentage >= 75 ? Color.Success : Color.Secondary)"
+                       Value="@_plateFillPercentage" Size="Size.Large" Rounded="true" Striped="true" />
+</MudPaper>
+
+<MudGrid Spacing="3">
+    <!-- Aktive Session-Wunschpakete (GM Kampagnen-Pakete) -->
+    <MudItem xs="12" md="7">
+        <MudPaper Elevation="2" Class="pa-4 h-100">
+            <div class="d-flex justify-space-between align-center mb-3">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoStories" Color="Color.Primary" />
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Aktuelle Session-Wunschpakete (Kampagnen)</MudText>
+                </div>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" Href="/cart">Eigenes Paket schnüren →</MudButton>
+            </div>
+
+            @if (_submittedOrders.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Noch keine Session-Pakete eingereicht.</MudAlert>
+            }
+            else
+            {
+                @foreach (var order in _submittedOrders)
+                {
+                    int totalItems = order.Requests.Sum(r => r.QuantityRequested);
+                    int doneItems = order.Requests
+                        .Where(r => r.Status is PrintRequestStatus.ReadyForPickup or PrintRequestStatus.CompletedHandedOver)
+                        .Sum(r => r.QuantityRequested);
+                    double progress = totalItems > 0 ? (doneItems * 100.0 / totalItems) : 0;
+
+                    <MudPaper Outlined="true" Class="pa-3 mb-3">
+                        <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-1">
+                            <div>
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@order.Title</MudText>
+                                <MudText Typo="Typo.caption" Style="opacity: 0.75;">
+                                    Angefordert von <strong>@order.RequesterDisplayName</strong>
+                                    @if (order.TargetSessionDate.HasValue)
+                                    {
+                                        <span> · 📅 Spieltermin: <strong>@order.TargetSessionDate.Value.ToString("dd.MM.yyyy")</strong></span>
+                                    }
+                                </MudText>
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Color="@(doneItems >= totalItems ? Color.Success : Color.Info)">
+                                @doneItems / @totalItems Figuren fertig (@progress.ToString("F0")%)
+                            </MudChip>
+                        </div>
+
+                        <MudProgressLinear Value="@progress" Color="@(doneItems >= totalItems ? Color.Success : Color.Primary)" Rounded="true" Class="my-2" />
+
+                        <div class="d-flex flex-wrap gap-1 mt-2">
+                            @foreach (var req in order.Requests)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@GetStatusColor(req.Status)">
+                                    @(req.QuantityRequested)x @req.Title (@NotificationService.GetGermanStatusName(req.Status))
+                                </MudChip>
+                            }
+                        </div>
+                    </MudPaper>
+                }
+            }
+        </MudPaper>
+    </MudItem>
+
+    <!-- Hall of Fame & Beliebteste Modelle -->
+    <MudItem xs="12" md="5">
+        <MudPaper Elevation="2" Class="pa-4 h-100">
+            <div class="d-flex justify-space-between align-center mb-3">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.WorkspacePremium" Color="Color.Warning" />
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Hall of Fame: Top-Modelle & Studios</MudText>
+                </div>
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" Href="/library">Katalog →</MudButton>
+            </div>
+
+            <MudList T="string" Dense="true">
+                @foreach (var m in _topModels)
+                {
+                    <MudListItem OnClick="@(() => Nav.NavigateTo($"/library/{m.Id}"))">
+                        <div class="d-flex justify-space-between align-center w-100">
+                            <div>
+                                <MudText Typo="Typo.body2" Style="font-weight: 700;">@m.Title</MudText>
+                                <MudText Typo="Typo.caption" Style="opacity: 0.75;">
+                                    @m.CreatorStudio · @m.EstimatedVolumeCm3.ToString("F1") ml · @m.BoundingBoxZMm.ToString("F0") mm hoch
+                                </MudText>
+                            </div>
+                            <div class="d-flex align-center gap-1">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">
+                                    🏆 @(m.PrintCount)x gedruckt
+                                </MudChip>
+                            </div>
+                        </div>
+                    </MudListItem>
+                    <MudDivider />
+                }
+            </MudList>
+
+            <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="font-weight: 700;">Beliebteste Studios in eurer Sammlung</MudText>
+            <div class="d-flex flex-wrap gap-2">
+                @foreach (var studio in _studioBreakdown)
+                {
+                    <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined" Size="Size.Small">
+                        @studio.Studio (@studio.ModelCount Modelle · @studio.TotalPrints Drucke)
+                    </MudChip>
+                }
+            </div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private int _totalModels;
+    private int _totalCollections;
+    private int _totalFiles;
+
+    private int _openMinisCount;
+    private double _openResinVolumeMl;
+    private double _plateFillPercentage;
+
+    private int _activePrintingCount;
+    private int _readyForPickupCount;
+    private int _activeBatchesCount;
+
+    private int _totalPrintedMinis;
+    private double _totalConsumedMl;
+
+    private List<PrintOrder> _submittedOrders = [];
+    private List<ModelItem> _topModels = [];
+    private List<(string Studio, int ModelCount, int TotalPrints)> _studioBreakdown = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardAsync();
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        _totalModels = await db.ModelItems.CountAsync();
+        _totalCollections = await db.Collections.CountAsync();
+        _totalFiles = await db.ModelFiles.CountAsync();
+
+        var allRequests = await db.PrintRequests.AsNoTracking().ToListAsync();
+        var openRequests = allRequests.Where(r => r.Status == PrintRequestStatus.RequestedOpen).ToList();
+
+        _openMinisCount = openRequests.Sum(r => r.QuantityRequested);
+        _openResinVolumeMl = openRequests.Where(r => r.PreferredTech != PrintingTechnology.FilamentFDM).Sum(r => r.EstimatedTotalVolumeMl);
+        _plateFillPercentage = Math.Min(100.0, Math.Round((_openResinVolumeMl / 50.0) * 100.0, 0));
+
+        _activePrintingCount = allRequests
+            .Where(r => r.Status is PrintRequestStatus.ScheduledOnPlate or PrintRequestStatus.Printing or PrintRequestStatus.PostProcessing)
+            .Sum(r => r.QuantityRequested);
+
+        _readyForPickupCount = allRequests
+            .Where(r => r.Status == PrintRequestStatus.ReadyForPickup)
+            .Sum(r => r.QuantityRequested);
+
+        _activeBatchesCount = await db.PrintBatches.CountAsync(b => b.Status != PrintBatchStatus.Completed);
+
+        var allModels = await db.ModelItems.AsNoTracking().ToListAsync();
+        _totalPrintedMinis = allModels.Sum(m => m.PrintCount);
+        _totalConsumedMl = allRequests
+            .Where(r => r.Status is PrintRequestStatus.ReadyForPickup or PrintRequestStatus.CompletedHandedOver)
+            .Sum(r => r.EstimatedTotalVolumeMl) + 185.0; // inkl. bisheriger Bestandsdrucke
+
+        _submittedOrders = await db.PrintOrders
+            .Include(o => o.Requests)
+            .Where(o => o.IsSubmitted)
+            .OrderByDescending(o => o.SubmittedAt)
+            .Take(5)
+            .AsNoTracking()
+            .ToListAsync();
+
+        _topModels = allModels
+            .OrderByDescending(m => m.PrintCount)
+            .ThenByDescending(m => m.EstimatedVolumeCm3)
+            .Take(5)
+            .ToList();
+
+        _studioBreakdown = allModels
+            .GroupBy(m => string.IsNullOrWhiteSpace(m.CreatorStudio) ? "Unbekannt" : m.CreatorStudio)
+            .Select(g => (g.Key, g.Count(), g.Sum(x => x.PrintCount)))
+            .OrderByDescending(x => x.Item3)
+            .ToList();
+    }
+
+    private string GetPlateFillRecommendation() => _plateFillPercentage switch
+    {
+        >= 90 => "🔥 Volle Platte bereit – Es lohnt sich definitiv, den Resindrucker anzuwerfen!",
+        >= 50 => "👍 Halbe bis dreiviertel Platte gefüllt – Druck lohnt sich schon gut.",
+        > 0 => "⏳ Noch wenige Wünsche in der Queue – du kannst noch sammeln.",
+        _ => "✨ Keine offenen Resin-Wünsche in der Warteschlange."
+    };
+
+    private static Color GetStatusColor(PrintRequestStatus status) => status switch
+    {
+        PrintRequestStatus.ReadyForPickup or PrintRequestStatus.CompletedHandedOver => Color.Success,
+        PrintRequestStatus.Printing or PrintRequestStatus.PostProcessing => Color.Info,
+        PrintRequestStatus.ScheduledOnPlate => Color.Secondary,
+        PrintRequestStatus.RequestedOpen => Color.Warning,
+        _ => Color.Default
+    };
+
+    private async Task OpenNewRequestAsync()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<CreateRequestDialog>("Neuer Druckwunsch", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadDashboardAsync();
+        }
+    }
+}

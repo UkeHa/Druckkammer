@@ -1,0 +1,145 @@
+@inherits LayoutComponentBase
+@inject UserContextService UserContext
+@inject PrintQueueService QueueService
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+
+<MudThemeProvider Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="2" Dense="false" Style="backdrop-filter: blur(8px);">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleDrawer" />
+
+        <div class="d-flex align-center gap-2 ml-2" style="cursor: pointer;" @onclick="@(() => Nav.NavigateTo("/"))">
+            <MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing" Color="Color.Primary" Size="Size.Large" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 800; letter-spacing: 0.04em; line-height: 1.1;">DRUCKKAMMER</MudText>
+                <MudText Typo="Typo.caption" Style="opacity: 0.75; display: block; line-height: 1;">3D-Bibliothek & Druckjob-Queue</MudText>
+            </div>
+        </div>
+
+        <MudSpacer />
+
+        @if (_currentUser.IsAuthenticated)
+        {
+            <div class="d-flex align-center gap-2">
+                @if (_currentUser.HasPermission(AppPermissions.QueueCreateRequest))
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.AddCircleOutline"
+                               OnClick="OpenQuickRequestDialogAsync">
+                        Neuer Druckwunsch
+                    </MudButton>
+
+                    <MudTooltip Text="Mein Session-Warenkorb (Wunsch-Paket für Spielrunde schnüren)">
+                        <MudBadge Content="_cartCount" Color="Color.Secondary" Overlap="true" Visible="@(_cartCount > 0)">
+                            <MudIconButton Icon="@Icons.Material.Filled.ShoppingBag" Color="Color.Inherit"
+                                           Href="/cart" />
+                        </MudBadge>
+                    </MudTooltip>
+                }
+
+                <MudTooltip Text="Dark / Light Mode umschalten">
+                    <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                                   Color="Color.Inherit" OnClick="@(() => _isDarkMode = !_isDarkMode)" />
+                </MudTooltip>
+
+                <MudChip T="string" Color="Color.Surface" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Person">
+                    @_currentUser.DisplayName (@string.Join(", ", _currentUser.Roles))
+                </MudChip>
+
+                <MudTooltip Text="Abmelden">
+                    <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" Href="/auth/logout" />
+                </MudTooltip>
+            </div>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Href="/login" StartIcon="@Icons.Material.Filled.Login">
+                Anmelden
+            </MudButton>
+        }
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="2" ClipMode="DrawerClipMode.Always">
+        <NavMenu CurrentUser="_currentUser" CartCount="_cartCount" />
+    </MudDrawer>
+
+    <MudMainContent Class="pt-16 px-4 pb-8" Style="min-height: 100vh;">
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private bool _isDarkMode = true;
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private int _cartCount;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#9575CD",
+            Secondary = "#26A69A",
+            Info = "#29B6F6",
+            Success = "#66BB6A",
+            Warning = "#FFA726",
+            Error = "#EF5350",
+            Background = "#12151E",
+            Surface = "#1C202E",
+            AppbarBackground = "#171A26",
+            DrawerBackground = "#171A26",
+            TextPrimary = "#ECEFF1",
+            TextSecondary = "#B0BEC5"
+        },
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#5E35B1",
+            Secondary = "#00897B",
+            Background = "#F4F6F9",
+            Surface = "#FFFFFF",
+            AppbarBackground = "#311B92"
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshUserAndCartAsync();
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        await RefreshUserAndCartAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshUserAndCartAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        if (_currentUser.IsAuthenticated)
+        {
+            _cartCount = await QueueService.GetActiveCartItemCountAsync(_currentUser.UserId);
+        }
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private async Task OpenQuickRequestDialogAsync()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<CreateRequestDialog>("Neuer Druckwunsch", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await RefreshUserAndCartAsync();
+            StateHasChanged();
+        }
+    }
+}

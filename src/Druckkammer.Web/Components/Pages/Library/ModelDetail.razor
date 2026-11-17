@@ -1,0 +1,378 @@
+@page "/library/{Id:int}"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ManagedStorageService StorageService
+@inject UserContextService UserContext
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>@(_model?.Title ?? "Modell-Details") – Druckkammer</PageTitle>
+
+@if (_model is null)
+{
+    <MudAlert Severity="Severity.Warning">Modell nicht gefunden.</MudAlert>
+}
+else
+{
+    <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-4">
+        <div class="d-flex align-center gap-2">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/library" />
+            <div>
+                <div class="d-flex align-center gap-2">
+                    <MudText Typo="Typo.h4" Style="font-weight: 800;">@_model.Title</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Secondary">@LibraryCatalog.GetScaleBadgeText(_model.ScaleSize)</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="@LibraryCatalog.GetPrintabilityColor(_model.Printability)">
+                        @LibraryCatalog.GetPrintabilityLabel(_model.Printability)
+                    </MudChip>
+                </div>
+                <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+                    Studio: <strong>@_model.CreatorStudio</strong>
+                    @(!string.IsNullOrWhiteSpace(_model.ReleaseMonth) ? $" · Release: {_model.ReleaseMonth}" : "")
+                    · 🏆 Bereits <strong>@(_model.PrintCount)x</strong> erfolgreich gedruckt
+                </MudText>
+            </div>
+        </div>
+
+        <div class="d-flex gap-2">
+            @if (!string.IsNullOrWhiteSpace(_model.ExternalSourceUrl))
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.OpenInNew"
+                           Href="@_model.ExternalSourceUrl" Target="_blank">
+                    Original-Quelle
+                </MudButton>
+            }
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                       StartIcon="@Icons.Material.Filled.AddShoppingCart"
+                       OnClick="OpenPrintRequestDialogAsync">
+                Als Druckwunsch / in Session-Warenkorb
+            </MudButton>
+        </div>
+    </div>
+
+    <MudGrid Spacing="3">
+        <!-- Linke Spalte: Interaktiver 3D-Viewer & Dateien / Slicer-Tresor -->
+        <MudItem xs="12" md="7">
+            <Model3DViewer ModelItemId="_model.Id"
+                           Files="_model.Files"
+                           CurrentThumbnailPath="_model.ThumbnailPath"
+                           HeightPx="400"
+                           OnThumbnailUpdated="OnThumbnailUpdated" />
+
+            <!-- Enthaltene Druckdateien & Slicer-Tresor -->
+            <MudPaper Elevation="2" Class="pa-4 mt-4">
+                <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-3">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" />
+                        <MudText Typo="Typo.h6" Style="font-weight: 700;">
+                            Enthaltene Dateien & Slicer-Tresor (@_model.Files.Count)
+                        </MudText>
+                    </div>
+
+                    @if (_currentUser.HasPermission(AppPermissions.LibraryUploadModels) || _currentUser.HasPermission(AppPermissions.QueueManageBatches))
+                    {
+                        <MudFileUpload T="IBrowserFile" FilesChanged="OnAdditionalFileUploadedAsync"
+                                       Accept=".stl,.obj,.3mf,.lys,.lyt,.chitubox,.ctb,.goo,.gcode,.png,.jpg">
+                            <ActivatorContent>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.UploadFile">
+                                    Slicer-Datei (.lys/.ctb) oder Variante hinzufügen
+                                </MudButton>
+                            </ActivatorContent>
+                        </MudFileUpload>
+                    }
+                </div>
+
+                <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                    <thead>
+                        <tr>
+                            <th>Variante / Datei</th>
+                            <th>Typ</th>
+                            <th>Volumen / Maße</th>
+                            <th>SHA-256</th>
+                            <th style="text-align: right;">Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var f in _model.Files.OrderBy(x => x.Category))
+                        {
+                            <tr>
+                                <td>
+                                    <MudText Typo="Typo.body2" Style="font-weight: 600;">@f.VariantLabel</MudText>
+                                    <MudText Typo="Typo.caption" Style="opacity: 0.7;">@f.FileName (@((f.FileSizeBytes / 1024.0).ToString("F0")) KB)</MudText>
+                                </td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetCategoryColor(f.Category)" Variant="Variant.Outlined">
+                                        @f.Category
+                                    </MudChip>
+                                </td>
+                                <td>
+                                    @if (f.VolumeCm3 > 0)
+                                    {
+                                        <MudText Typo="Typo.body2">💧 @f.VolumeCm3.ToString("F1") ml</MudText>
+                                        <MudText Typo="Typo.caption">@f.DimXMm.ToString("F0")×@f.DimYMm.ToString("F0")×@f.DimZMm.ToString("F0") mm</MudText>
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.caption" Style="opacity: 0.6;">—</MudText>
+                                    }
+                                </td>
+                                <td>
+                                    <MudTooltip Text="@($"SHA-256: {f.Sha256Hash}")">
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text">
+                                            #@f.Sha256Hash[..Math.Min(8, f.Sha256Hash.Length)]
+                                        </MudChip>
+                                    </MudTooltip>
+                                </td>
+                                <td style="text-align: right;">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Download" Color="Color.Primary" Size="Size.Small"
+                                                   Href="@($"/api/files/{f.Id}/download")" Target="_blank" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        </MudItem>
+
+        <!-- Rechte Spalte: Printability-Ampel, Collections/Tags & Makes/Bemal-Galerie -->
+        <MudItem xs="12" md="5">
+            <!-- Printability-Ampel & Erfahrungsnotizen -->
+            <MudPaper Elevation="2" Class="pa-4 mb-4">
+                <div class="d-flex align-center gap-2 mb-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Traffic" Color="Color.Warning" />
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Printability-Ampel & Druck-Erfahrung</MudText>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_model.Description))
+                {
+                    <MudText Typo="Typo.body2" Class="mb-3" Style="opacity: 0.85;">@_model.Description</MudText>
+                }
+
+                <MudSelect T="PrintabilityStatus" @bind-Value="_editPrintability" Label="Druckbarkeits-Bewertung (Presupports & Details)"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2">
+                    <MudSelectItem Value="PrintabilityStatus.Untested">⚪ Ungetestet</MudSelectItem>
+                    <MudSelectItem Value="PrintabilityStatus.GreenGood">🟢 Grün – Presupports top, druckt perfekt out-of-the-box</MudSelectItem>
+                    <MudSelectItem Value="PrintabilityStatus.YellowCaution">🟡 Gelb – Vorsicht bei dünnen Details / leichte Nacharbeit</MudSelectItem>
+                    <MudSelectItem Value="PrintabilityStatus.RedNeedsWork">🔴 Rot – Supports fehlerhaft, manuell in Lychee stützen!</MudSelectItem>
+                </MudSelect>
+
+                <MudTextField @bind-Value="_editPrintabilityNotes" Label="Technische Erfahrungsnotizen für zukünftige Drucke"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3"
+                              Placeholder="z.B. 'Auf Saturn 4 mit 2.0s gedruckt. Am Schwert 2 zusätzliche Mini-Supports setzen!'" />
+
+                <div class="d-flex justify-end mt-2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Save" OnClick="SavePrintabilityAsync">
+                        Erfahrung speichern
+                    </MudButton>
+                </div>
+            </MudPaper>
+
+            <!-- Collections & Tags Zuordnung -->
+            <MudPaper Elevation="2" Class="pa-4 mb-4">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Collections & Tags</MudText>
+                <div class="mb-2">
+                    <MudText Typo="Typo.caption" Style="opacity: 0.7;">Enthalten in Collections:</MudText>
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        @foreach (var mc in _model.Collections)
+                        {
+                            if (mc.Collection is not null)
+                            {
+                                <MudChip T="string" Color="Color.Secondary" Variant="Variant.Outlined" Size="Size.Small"
+                                         Href="@($"/collections/{mc.CollectionId}")">
+                                    📁 @mc.Collection.Name
+                                </MudChip>
+                            }
+                        }
+                    </div>
+                </div>
+
+                <div>
+                    <MudText Typo="Typo.caption" Style="opacity: 0.7;">Tags:</MudText>
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        @foreach (var mt in _model.Tags)
+                        {
+                            if (mt.Tag is not null)
+                            {
+                                <MudChip T="string" Color="Color.Primary" Variant="Variant.Text" Size="Size.Small">#@mt.Tag.Name</MudChip>
+                            }
+                        }
+                    </div>
+                </div>
+            </MudPaper>
+
+            <!-- Makes & Bemal-Galerie am Modell -->
+            <MudPaper Elevation="2" Class="pa-4">
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.PhotoCamera" Color="Color.Info" />
+                        <MudText Typo="Typo.h6" Style="font-weight: 700;">Makes & Bemal-Galerie (@_model.Makes.Count)</MudText>
+                    </div>
+                </div>
+
+                @if (_model.Makes.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-3">
+                        Noch kein Foto hochgeladen – teile dein erstes gedrucktes oder bemaltes Ergebnis!
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudGrid Spacing="2" Class="mb-3">
+                        @foreach (var make in _model.Makes.OrderByDescending(m => m.CreatedAt))
+                        {
+                            <MudItem xs="12" sm="6">
+                                <MudPaper Outlined="true" Class="pa-2">
+                                    <img src="@($"/media/{make.ImagePath}")" alt="@make.Caption"
+                                         style="width: 100%; height: 130px; object-fit: cover; border-radius: 6px;" />
+                                    <div class="d-flex justify-space-between align-center mt-1">
+                                        <MudText Typo="Typo.caption" Style="font-weight: 700;">@make.UserDisplayName</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="@(make.IsPainted ? Color.Success : Color.Info)">
+                                            @(make.IsPainted ? "🎨 Bemalt" : "🖨️ Gedruckt")
+                                        </MudChip>
+                                    </div>
+                                    <MudText Typo="Typo.caption" Style="opacity: 0.8;">@make.Caption</MudText>
+                                </MudPaper>
+                            </MudItem>
+                        }
+                    </MudGrid>
+                }
+
+                <!-- Make Foto hochladen -->
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Eigenes Make- oder Bemal-Foto teilen:</MudText>
+                <MudTextField @bind-Value="_newMakeCaption" Label="Kommentar (z.B. 'Mit Vallejo Farben bemalt')" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                <div class="d-flex justify-space-between align-center">
+                    <MudCheckBox T="bool" @bind-Value="_newMakeIsPainted" Label="🎨 Figur ist bereits fertig bemalt" Color="Color.Success" Dense="true" />
+                    <MudFileUpload T="IBrowserFile" FilesChanged="UploadMakePhotoAsync" Accept=".png,.jpg,.jpeg,.webp">
+                        <ActivatorContent>
+                            <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddAPhoto">
+                                Foto hochladen
+                            </MudButton>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                </div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private ModelItem? _model;
+    private PrintabilityStatus _editPrintability;
+    private string _editPrintabilityNotes = string.Empty;
+
+    private string _newMakeCaption = string.Empty;
+    private bool _newMakeIsPainted = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        await LoadModelAsync();
+    }
+
+    private async Task LoadModelAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _model = await db.ModelItems
+            .Include(m => m.Files)
+            .Include(m => m.Collections).ThenInclude(mc => mc.Collection)
+            .Include(m => m.Tags).ThenInclude(mt => mt.Tag)
+            .Include(m => m.Makes)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == Id);
+
+        if (_model is not null)
+        {
+            _editPrintability = _model.Printability;
+            _editPrintabilityNotes = _model.PrintabilityNotes;
+        }
+    }
+
+    private void OnThumbnailUpdated(string newRelPath)
+    {
+        if (_model is not null)
+            _model.ThumbnailPath = newRelPath;
+    }
+
+    private async Task SavePrintabilityAsync()
+    {
+        if (_model is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.ModelItems.FindAsync(_model.Id);
+        if (entity is not null)
+        {
+            entity.Printability = _editPrintability;
+            entity.PrintabilityNotes = _editPrintabilityNotes.Trim();
+            entity.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            await LoadModelAsync();
+            Snackbar.Add("Printability-Ampel & Erfahrungsnotizen gespeichert!", Severity.Success);
+        }
+    }
+
+    private async Task OnAdditionalFileUploadedAsync(IBrowserFile? file)
+    {
+        if (file is null || _model is null) return;
+        await using var stream = file.OpenReadStream(maxAllowedSize: 250 * 1024 * 1024);
+        var stored = await StorageService.StoreModelFileStreamAsync(
+            stream,
+            file.Name,
+            _model.CreatorStudio,
+            _model.Collections.FirstOrDefault()?.Collection?.Name ?? "Allgemein",
+            _model.Title);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.ModelItems.Include(m => m.Files).FirstOrDefaultAsync(m => m.Id == _model.Id);
+        if (entity is not null)
+        {
+            ManagedStorageService.AttachStoredFileToModel(entity, file.Name, stored);
+            ManagedStorageService.FinalizeModelMetrics(entity);
+            await db.SaveChangesAsync();
+            await LoadModelAsync();
+            Snackbar.Add($"Datei '{file.Name}' zum Modell hinzugefügt!", Severity.Success);
+        }
+    }
+
+    private async Task UploadMakePhotoAsync(IBrowserFile? photo)
+    {
+        if (photo is null || _model is null) return;
+        await using var stream = photo.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024);
+        string relPath = await StorageService.SaveMakeImageStreamAsync(stream, photo.Name);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.ModelMakes.Add(new ModelMake
+        {
+            ModelItemId = _model.Id,
+            UserId = _currentUser.UserId,
+            UserDisplayName = _currentUser.DisplayName,
+            ImagePath = relPath,
+            Caption = string.IsNullOrWhiteSpace(_newMakeCaption) ? "Mein Druckergebnis" : _newMakeCaption.Trim(),
+            IsPainted = _newMakeIsPainted,
+            MaterialUsed = "Resin SLA"
+        });
+        await db.SaveChangesAsync();
+        _newMakeCaption = string.Empty;
+        await LoadModelAsync();
+        Snackbar.Add("Make-Foto in der Galerie veröffentlicht!", Severity.Success);
+    }
+
+    private async Task OpenPrintRequestDialogAsync()
+    {
+        if (_model is null) return;
+        var parameters = new DialogParameters<CreateRequestDialog> { { x => x.PreselectedModel, _model } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<CreateRequestDialog>("Druckwunsch anlegen", parameters, options);
+    }
+
+    private static Color GetCategoryColor(ModelFileCategory cat) => cat switch
+    {
+        ModelFileCategory.PresupportedMesh => Color.Success,
+        ModelFileCategory.SlicerProject or ModelFileCategory.SlicedPlate => Color.Info,
+        ModelFileCategory.BaseMesh => Color.Secondary,
+        _ => Color.Default
+    };
+}

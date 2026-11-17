@@ -1,0 +1,205 @@
+@page "/cart"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject PrintQueueService QueueService
+@inject UserContextService UserContext
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Session-Warenkorb & Wunsch-Pakete – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">🎲 Mein Session-Warenkorb (Wunsch-Paket)</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Sammle mehrere Figuren aus der Bibliothek für deinen nächsten Spielabend und schicke sie gesammelt mit einem Zieldatum ab.
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ViewInAr" Href="/library">
+        Weitere Minis aus Katalog hinzufügen
+    </MudButton>
+</div>
+
+@if (_activeCart is not null && _activeCart.Requests.Count > 0)
+{
+    <MudPaper Elevation="3" Class="pa-5 mb-5" Style="border-left: 5px solid #26A69A;">
+        <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-3">
+            Aktuelles Wunsch-Paket vorbereiten (@_activeCart.Requests.Sum(r => r.QuantityRequested) Figuren)
+        </MudText>
+
+        <MudGrid Spacing="2" Class="mb-4">
+            <MudItem xs="12" sm="5">
+                <MudTextField @bind-Value="_packageTitle" Label="Name des Session-Pakets (z.B. 'D&D Session #15: Drachenhort')"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudDatePicker @bind-Date="_targetDate" Label="Wunschtermin / Spielabend" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="RequestPriority" @bind-Value="_priority" Label="Priorität" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="RequestPriority.Normal">Normal</MudSelectItem>
+                    <MudSelectItem Value="RequestPriority.HighSessionUrgent">🔥 Dringend für nächste Session!</MudSelectItem>
+                    <MudSelectItem Value="RequestPriority.Low">Niedrig (Vorrat)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_packageDescription" Label="Nachricht an den Drucker-Operator"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
+
+        <MudSimpleTable Dense="true" Hover="true" Class="mb-4">
+            <thead>
+                <tr>
+                    <th>Modell / Figur</th>
+                    <th>Stückzahl</th>
+                    <th>Maßstab</th>
+                    <th>Volumen (inkl. Supports)</th>
+                    <th>Geschätzte Kosten</th>
+                    <th style="text-align: right;">Entfernen</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _activeCart.Requests)
+                {
+                    <tr>
+                        <td>
+                            <strong>@item.Title</strong>
+                            @if (!string.IsNullOrWhiteSpace(item.RequesterNotes))
+                            {
+                                <MudText Typo="Typo.caption" Class="d-block">@item.RequesterNotes</MudText>
+                            }
+                        </td>
+                        <td style="width: 130px;">
+                            <MudNumericField T="int" Value="@item.QuantityRequested"
+                                             ValueChanged="@((q) => UpdateCartItemQuantityAsync(item, q))"
+                                             Min="1" Max="100" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                        </td>
+                        <td>@item.ScalePercentage.ToString("F0")%</td>
+                        <td>💧 @item.EstimatedTotalVolumeMl.ToString("F1") ml</td>
+                        <td>💶 @item.EstimatedCostEur.ToString("F2") €</td>
+                        <td style="text-align: right;">
+                            <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Color="Color.Error" Size="Size.Small"
+                                           OnClick="@(() => RemoveCartItemAsync(item.Id))" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+
+        <div class="d-flex flex-wrap justify-space-between align-center gap-3">
+            <div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">
+                    Gesamtschätzung: @_activeCart.Requests.Sum(r => r.EstimatedTotalVolumeMl).ToString("F1") ml Resin ·
+                    ca. @_activeCart.Requests.Sum(r => r.EstimatedCostEur).ToString("F2") €
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                       StartIcon="@Icons.Material.Filled.RocketLaunch"
+                       OnClick="SubmitCartAsync">
+                Gesamtes Session-Paket ans Kanban-Board absenden
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Class="pa-6 mb-5 text-center">
+        <MudIcon Icon="@Icons.Material.Filled.ShoppingBag" Style="font-size: 3rem; opacity: 0.5;" />
+        <MudText Typo="Typo.h6" Class="mt-2">Dein Session-Warenkorb ist aktuell leer</MudText>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity: 0.75;">
+            Klicke im Modell-Katalog oder in einer Collection auf „Wünschen → In Session-Warenkorb legen“.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/library">Zum Modell-Katalog</MudButton>
+    </MudPaper>
+}
+
+<!-- Bisher eingereichte Wunsch-Pakete -->
+<MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-3">Meine eingereichten Session-Pakete</MudText>
+@foreach (var ord in _mySubmittedOrders)
+{
+    int total = ord.Requests.Sum(r => r.QuantityRequested);
+    int done = ord.Requests.Where(r => r.Status is PrintRequestStatus.ReadyForPickup or PrintRequestStatus.CompletedHandedOver).Sum(r => r.QuantityRequested);
+    <MudPaper Elevation="2" Class="pa-4 mb-3">
+        <div class="d-flex justify-space-between align-center">
+            <div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@ord.Title</MudText>
+                <MudText Typo="Typo.caption" Style="opacity: 0.75;">
+                    Eingereicht am @(ord.SubmittedAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—")
+                    @(ord.TargetSessionDate.HasValue ? $" · Zieltermin: {ord.TargetSessionDate.Value:dd.MM.yyyy}" : "")
+                </MudText>
+            </div>
+            <MudChip T="string" Color="@(done >= total ? Color.Success : Color.Info)" Size="Size.Small">
+                @done / @total Figuren fertig
+            </MudChip>
+        </div>
+    </MudPaper>
+}
+
+@code {
+    private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
+    private PrintOrder? _activeCart;
+    private List<PrintOrder> _mySubmittedOrders = [];
+
+    private string _packageTitle = string.Empty;
+    private string _packageDescription = string.Empty;
+    private DateTime? _targetDate = DateTime.Today.AddDays(7);
+    private RequestPriority _priority = RequestPriority.HighSessionUrgent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentUser = await UserContext.GetCurrentUserAsync();
+        await LoadCartAsync();
+    }
+
+    private async Task LoadCartAsync()
+    {
+        if (!_currentUser.IsAuthenticated) return;
+        _activeCart = await QueueService.GetOrCreateActiveCartAsync(_currentUser.UserId, _currentUser.DisplayName);
+        _packageTitle = _activeCart.Title;
+        _packageDescription = _activeCart.Description;
+        _targetDate = _activeCart.TargetSessionDate ?? DateTime.Today.AddDays(7);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _mySubmittedOrders = await db.PrintOrders
+            .Include(o => o.Requests)
+            .Where(o => o.RequesterUserId == _currentUser.UserId && o.IsSubmitted)
+            .OrderByDescending(o => o.SubmittedAt)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    private async Task UpdateCartItemQuantityAsync(PrintRequest item, int newQty)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrintRequests.FindAsync(item.Id);
+        if (entity is not null)
+        {
+            entity.QuantityRequested = Math.Max(1, newQty);
+            entity.EstimatedTotalVolumeMl = StlAnalysisService.CalculateEstimatedTotalVolumeMl(entity.BaseUnitVolumeCm3, entity.QuantityRequested, entity.ScalePercentage);
+            entity.EstimatedCostEur = StlAnalysisService.CalculateEstimatedMaterialCostEur(entity.EstimatedTotalVolumeMl, 24.90m);
+            await db.SaveChangesAsync();
+            await LoadCartAsync();
+        }
+    }
+
+    private async Task RemoveCartItemAsync(int requestId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.PrintRequests.FindAsync(requestId);
+        if (entity is not null)
+        {
+            db.PrintRequests.Remove(entity);
+            await db.SaveChangesAsync();
+            await LoadCartAsync();
+        }
+    }
+
+    private async Task SubmitCartAsync()
+    {
+        if (_activeCart is null) return;
+        await QueueService.SubmitSessionCartAsync(_activeCart.Id, _packageTitle, _packageDescription, _targetDate, _priority);
+        Snackbar.Add($"Session-Paket '{_packageTitle}' wurde ins Kanban-Board eingereiht!", Severity.Success);
+        Nav.NavigateTo("/kanban");
+    }
+}

@@ -1,0 +1,223 @@
+@using Druckkammer.Web.Data
+@using Druckkammer.Web.Data.Entities
+@using Druckkammer.Web.Services
+@using Microsoft.EntityFrameworkCore
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ManagedStorageService StorageService
+@inject ISnackbar Snackbar
+
+<MudPaper Elevation="2" Class="pa-3" Style="background: #181B24; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;">
+    <div class="d-flex flex-wrap align-center justify-space-between gap-2 mb-2">
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.ViewInAr" Color="Color.Primary" />
+            <MudText Typo="Typo.subtitle2" Style="color: #ECEFF1;">Interaktive 3D-Vorschau</MudText>
+            @if (_activeFile is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">
+                    @_activeFile.VariantLabel (@(_activeFile.VolumeCm3.ToString("F1")) ml | @(_activeFile.DimXMm.ToString("F0"))×@(_activeFile.DimYMm.ToString("F0"))×@(_activeFile.DimZMm.ToString("F0")) mm)
+                </MudChip>
+            }
+        </div>
+
+        <div class="d-flex align-center gap-1">
+            @if (MeshFiles.Count > 1)
+            {
+                <MudSelect T="int" Value="_selectedFileId" ValueChanged="OnSelectFileChanged" Dense="true" Margin="Margin.Dense"
+                           Variant="Variant.Outlined" Style="min-width: 190px; font-size: 0.8rem;">
+                    @foreach (var f in MeshFiles)
+                    {
+                        <MudSelectItem Value="@f.Id">@f.VariantLabel (@GetCategoryShortName(f.Category))</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            <MudTooltip Text="Drahtgitter (Wireframe) umschalten">
+                <MudIconButton Icon="@Icons.Material.Filled.GridOn" Size="Size.Small"
+                               Color="@(_wireframe ? Color.Secondary : Color.Default)"
+                               OnClick="ToggleWireframeAsync" />
+            </MudTooltip>
+            <MudTooltip Text="Auto-Rotation an/aus">
+                <MudIconButton Icon="@Icons.Material.Filled.Autorenew" Size="Size.Small"
+                               Color="@(_autoRotate ? Color.Primary : Color.Default)"
+                               OnClick="ToggleAutoRotateAsync" />
+            </MudTooltip>
+            <MudTooltip Text="Kamera zurücksetzen">
+                <MudIconButton Icon="@Icons.Material.Filled.CenterFocusStrong" Size="Size.Small"
+                               OnClick="ResetCameraAsync" />
+            </MudTooltip>
+            <MudTooltip Text="Aktuelle 3D-Ansicht als Modell-Vorschaubild speichern">
+                <MudIconButton Icon="@Icons.Material.Filled.PhotoCamera" Size="Size.Small" Color="Color.Info"
+                               OnClick="CaptureManualThumbnailAsync" />
+            </MudTooltip>
+        </div>
+    </div>
+
+    <div id="@_containerId" style="width: 100%; height: @(HeightPx)px; border-radius: 8px; overflow: hidden; position: relative;">
+    </div>
+
+    <div class="d-flex justify-space-between align-center mt-2">
+        <MudText Typo="Typo.caption" Style="color: #90A4AE;">
+            🖱️ Ziehen zum Drehen · Mausrad zum Zoomen · Kamera-Icon speichert aktuelles Vorschaubild
+        </MudText>
+        @if (_activeFile is not null)
+        {
+            <MudText Typo="Typo.caption" Style="color: #90A4AE;">
+                @_activeFile.TriangleCount.ToString("N0") Dreiecke · @_activeFile.FileName
+            </MudText>
+        }
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public int ModelItemId { get; set; }
+    [Parameter] public List<ModelFile> Files { get; set; } = [];
+    [Parameter] public string? CurrentThumbnailPath { get; set; }
+    [Parameter] public int HeightPx { get; set; } = 360;
+    [Parameter] public EventCallback<string> OnThumbnailUpdated { get; set; }
+
+    private readonly string _containerId = $"stl-viewer-{Guid.NewGuid():N}";
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<Model3DViewer>? _dotNetRef;
+
+    private int _selectedFileId;
+    private ModelFile? _activeFile;
+    private bool _wireframe;
+    private bool _autoRotate = true;
+
+    private List<ModelFile> MeshFiles => Files
+        .Where(f => f.FileExtension is ".stl" or ".obj")
+        .OrderByDescending(f => f.Category == ModelFileCategory.PresupportedMesh)
+        .ThenByDescending(f => f.Category == ModelFileCategory.UnsupportedMesh)
+        .ToList();
+
+    protected override void OnParametersSet()
+    {
+        if (_activeFile is null && MeshFiles.Count > 0)
+        {
+            _activeFile = MeshFiles[0];
+            _selectedFileId = _activeFile.Id;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _activeFile is not null)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/viewer3d.js");
+            await LoadActiveMeshIntoViewerAsync();
+        }
+    }
+
+    private async Task LoadActiveMeshIntoViewerAsync()
+    {
+        if (_jsModule is null || _activeFile is null) return;
+        string url = $"/media/{_activeFile.RelativeStoragePath}";
+        bool autoCapture = string.IsNullOrWhiteSpace(CurrentThumbnailPath);
+        await _jsModule.InvokeVoidAsync("initViewer", _containerId, url, _dotNetRef, autoCapture);
+    }
+
+    private async Task OnSelectFileChanged(int fileId)
+    {
+        _selectedFileId = fileId;
+        _activeFile = MeshFiles.FirstOrDefault(f => f.Id == fileId);
+        await LoadActiveMeshIntoViewerAsync();
+    }
+
+    private async Task ToggleWireframeAsync()
+    {
+        _wireframe = !_wireframe;
+        if (_jsModule is not null)
+            await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, false);
+    }
+
+    private async Task ToggleAutoRotateAsync()
+    {
+        _autoRotate = !_autoRotate;
+        if (_jsModule is not null)
+            await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, false);
+    }
+
+    private async Task ResetCameraAsync()
+    {
+        if (_jsModule is not null)
+            await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, true);
+    }
+
+    private async Task CaptureManualThumbnailAsync()
+    {
+        if (_jsModule is null) return;
+        var dataUrl = await _jsModule.InvokeAsync<string?>("captureSnapshotDataUrl", _containerId);
+        if (!string.IsNullOrWhiteSpace(dataUrl))
+        {
+            await SaveDataUrlAsThumbnailAsync(dataUrl, showToast: true);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnAutoThumbnailCaptured(string dataUrl)
+    {
+        if (string.IsNullOrWhiteSpace(CurrentThumbnailPath) && !string.IsNullOrWhiteSpace(dataUrl))
+        {
+            await SaveDataUrlAsThumbnailAsync(dataUrl, showToast: false);
+        }
+    }
+
+    private async Task SaveDataUrlAsThumbnailAsync(string dataUrl, bool showToast)
+    {
+        try
+        {
+            int commaIdx = dataUrl.IndexOf(',');
+            if (commaIdx < 0) return;
+
+            byte[] bytes = Convert.FromBase64String(dataUrl[(commaIdx + 1)..]);
+            string relPath = await StorageService.SaveThumbnailBytesAsync(bytes, $"model_{ModelItemId}");
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var model = await db.ModelItems.FindAsync(ModelItemId);
+            if (model is not null)
+            {
+                model.ThumbnailPath = relPath;
+                await db.SaveChangesAsync();
+                CurrentThumbnailPath = relPath;
+                await OnThumbnailUpdated.InvokeAsync(relPath);
+                if (showToast)
+                {
+                    Snackbar.Add("3D-Vorschaubild wurde gespeichert!", Severity.Success);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (showToast)
+                Snackbar.Add($"Vorschaubild konnte nicht gespeichert werden: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private static string GetCategoryShortName(ModelFileCategory cat) => cat switch
+    {
+        ModelFileCategory.PresupportedMesh => "Presupported",
+        ModelFileCategory.UnsupportedMesh => "Unsupported",
+        ModelFileCategory.BaseMesh => "Base",
+        ModelFileCategory.PartMesh => "Einzelteil",
+        _ => "Mesh"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try
+            {
+                await _jsModule.InvokeVoidAsync("disposeViewer", _containerId);
+                await _jsModule.DisposeAsync();
+            }
+            catch
+            {
+                // Ignore JS disconnection errors on page navigation
+            }
+        }
+        _dotNetRef?.Dispose();
+    }
+}
