@@ -229,6 +229,12 @@
     {
         await using var db = await DbFactory.CreateDbContextAsync();
 
+        if (!await db.Users.AnyAsync())
+        {
+            Nav.NavigateTo("/setup", replace: true);
+            return;
+        }
+
         _totalModels = await db.ModelItems.CountAsync();
         _totalCollections = await db.Collections.CountAsync();
         _totalFiles = await db.ModelFiles.CountAsync();
@@ -254,7 +260,7 @@
         _totalPrintedMinis = allModels.Sum(m => m.PrintCount);
         _totalConsumedMl = allRequests
             .Where(r => r.Status is PrintRequestStatus.ReadyForPickup or PrintRequestStatus.CompletedHandedOver)
-            .Sum(r => r.EstimatedTotalVolumeMl) + 185.0; // inkl. bisheriger Bestandsdrucke
+            .Sum(r => r.EstimatedTotalVolumeMl);
 
         _submittedOrders = await db.PrintOrders
             .Include(o => o.Requests)

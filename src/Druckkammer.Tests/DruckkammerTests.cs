@@ -246,4 +246,43 @@ public class DruckkammerTests
                 File.Delete(tempDbPath);
         }
     }
+
+    [Fact]
+    public async Task DatabaseInitializer_ShouldSeedRolesWithoutPreinstalledDemoUsers()
+    {
+        var services = new ServiceCollection();
+        string dbName = $"DruckkammerInitTest_{Guid.NewGuid():N}.db";
+        string tempDbPath = Path.Combine(Path.GetTempPath(), dbName);
+
+        try
+        {
+            services.AddDbContext<ApplicationDbContext>(opt => opt.UseSqlite($"Data Source={tempDbPath}"));
+            services.AddIdentityCore<ApplicationUser>()
+                .AddRoles<Microsoft.AspNetCore.Identity.IdentityRole>()
+                .AddEntityFrameworkStores<ApplicationDbContext>();
+            services.AddLogging();
+
+            var provider = services.BuildServiceProvider();
+            await DatabaseInitializer.InitializeAsync(provider);
+
+            using var scope = provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            // Keine vorinstallierten Demo-Zugänge
+            Assert.False(await db.Users.AnyAsync());
+
+            // Alle 4 Standardrollen sind angelegt
+            var roles = await db.Roles.Select(r => r.Name).ToListAsync();
+            Assert.Equal(4, roles.Count);
+            Assert.Contains(AppRoles.Admin, roles);
+            Assert.Contains(AppRoles.Operator, roles);
+            Assert.Contains(AppRoles.Curator, roles);
+            Assert.Contains(AppRoles.Requester, roles);
+        }
+        finally
+        {
+            if (File.Exists(tempDbPath))
+                File.Delete(tempDbPath);
+        }
+    }
 }

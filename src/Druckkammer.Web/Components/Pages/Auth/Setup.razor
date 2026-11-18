@@ -1,0 +1,76 @@
+@page "/setup"
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+
+<PageTitle>Ersteinrichtung (Admin-Account) – Druckkammer</PageTitle>
+
+<MudGrid Justify="Justify.Center" Class="mt-6">
+    <MudItem xs="12" sm="8" md="5">
+        <MudPaper Elevation="4" Class="pa-6" Style="border-radius: 16px; border-top: 4px solid #9575CD;">
+            <div class="d-flex flex-column align-center mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.AdminPanelSettings" Color="Color.Primary" Style="font-size: 3.2rem;" />
+                <MudText Typo="Typo.h5" Style="font-weight: 800;" Class="mt-2">Willkommen bei Druckkammer</MudText>
+                <MudText Typo="Typo.body2" Class="text-center" Style="opacity: 0.8;">
+                    Ersteinrichtung: Lege jetzt den ersten <strong>Administrator- &amp; Operator-Account</strong> für deine Instanz an.
+                </MudText>
+            </div>
+
+            @if (_error == "missing")
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">Bitte fülle alle Pflichtfelder aus.</MudAlert>
+            }
+            else if (_error == "mismatch")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">Die eingegebenen Passwörter stimmen nicht überein.</MudAlert>
+            }
+            else if (_error == "short_password" || _error == "invalid")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">Das Passwort muss mindestens 6 Zeichen lang sein.</MudAlert>
+            }
+
+            <form method="post" action="/auth/setup">
+                <MudTextField T="string" Label="Dein Name / Spitzname (z.B. Uke)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "displayName" })"
+                              Required="true" Class="mb-3" />
+
+                <MudTextField T="string" Label="Admin E-Mail-Adresse" InputType="InputType.Email" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "email" })"
+                              Required="true" Class="mb-3" />
+
+                <MudTextField T="string" Label="Passwort (mind. 6 Zeichen)" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "password" })"
+                              Required="true" Class="mb-3" />
+
+                <MudTextField T="string" Label="Passwort bestätigen" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "confirmPassword" })"
+                              Required="true" Class="mb-4" />
+
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                           StartIcon="@Icons.Material.Filled.RocketLaunch">
+                    Administrator-Account einrichten &amp; starten
+                </MudButton>
+            </form>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (await db.Users.AnyAsync())
+        {
+            Nav.NavigateTo("/login", replace: true);
+            return;
+        }
+
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("error", out var err))
+            _error = err.ToString();
+    }
+}

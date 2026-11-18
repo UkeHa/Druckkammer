@@ -1,5 +1,7 @@
 @page "/register"
 @using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Nav
 
 <PageTitle>Registrieren – Druckkammer</PageTitle>
@@ -27,13 +29,17 @@
             }
 
             <form method="post" action="/auth/register">
-                <MudTextField T="string" Name="displayName" Label="Dein Name / Spitzname (z.B. Alex)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                <MudTextField T="string" Label="Dein Name / Spitzname (z.B. Alex)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "displayName" })"
                               Required="true" Class="mb-3" />
-                <MudTextField T="string" Name="email" Label="E-Mail-Adresse" Variant="Variant.Outlined" Margin="Margin.Dense"
+                <MudTextField T="string" Label="E-Mail-Adresse" InputType="InputType.Email" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "email" })"
                               Required="true" Class="mb-3" />
-                <MudTextField T="string" Name="password" Label="Passwort (mind. 6 Zeichen)" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                <MudTextField T="string" Label="Passwort (mind. 6 Zeichen)" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "password" })"
                               Required="true" Class="mb-3" />
-                <MudTextField T="string" Name="inviteCode" Label="Einladungscode (z.B. DND-GRUPPE-2026)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                <MudTextField T="string" Label="Einladungscode (optional)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "inviteCode" })"
                               Value="@_inviteCode" HelperText="Ohne Code muss der Admin deinen Account manuell freischalten." Class="mb-4" />
 
                 <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Secondary" FullWidth="true" Size="Size.Large"
@@ -51,10 +57,17 @@
 
 @code {
     private string? _error;
-    private string _inviteCode = "DND-GRUPPE-2026";
+    private string _inviteCode = string.Empty;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (!await db.Users.AnyAsync())
+        {
+            Nav.NavigateTo("/setup", replace: true);
+            return;
+        }
+
         var uri = Nav.ToAbsoluteUri(Nav.Uri);
         var query = QueryHelpers.ParseQuery(uri.Query);
         if (query.TryGetValue("error", out var err)) _error = err.ToString();

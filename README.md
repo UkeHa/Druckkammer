@@ -23,8 +23,9 @@
 - **Teil-Fehldruck-Recovery**: Sind auf einer Platte z.B. 6 von 8 Figuren gelungen, werden die 2 fehlgeschlagenen Exemplare beim Plattenabschluss automatisch als Nachdruck für die nächste Buildplate neu eingereiht.
 - **Kaffeekasse & Hall of Fame**: Automatische Materialkostenschätzung pro User sowie Gemeinschafts-Statistiken.
 
-### 3. Multi-User, Onboarding & RBAC-Rechtesystem
-- **Onboarding**: Registrierung per **Einladungs-Code (`InviteToken`)** oder mit Admin-Freischaltung.
+### 3. Multi-User, Ersteinrichtung & RBAC-Rechtesystem
+- **Ersteinrichtung (`/setup`)**: Es gibt keine vorinstallierten Demo-Accounts. Beim allerersten Aufruf der Anwendung wird automatisch der Einrichtungsdialog für den ersten **Administrator- & Operator-Account** angezeigt.
+- **Onboarding für Freunde/Mitspieler**: Registrierung per **Einladungs-Code (`InviteToken`)** oder mit Admin-Freischaltung.
 - **Feingranulare Berechtigungen (`AppPermissions`)**: Standardrollen (`Admin`, `Drucker-Operator`, `Bibliotheks-Kurator`, `Anforderer`) mit live im Admin-Bereich anpassbarer Berechtigungs-Matrix.
 - **Webhooks**: Benachrichtigungen über Discord, Telegram, generischen JSON-Webhook oder SMTP.
 
@@ -36,23 +37,11 @@
 docker compose up -d --build
 ```
 
-Die Anwendung ist anschließend unter **`http://localhost:8080`** erreichbar.
+Die Anwendung ist anschließend unter **`http://localhost:8080`** erreichbar und leitet beim ersten Start automatisch auf **`/setup`** zur Einrichtung deines Admin-Kontos weiter.
 
 ### Volumes
 - `./data:/data` – Persistenter App-Speicher (SQLite-Datenbank `druckkammer.db`, kanonischer Modellspeicher `/data/storage`, Thumbnails & Makes).
 - `./import:/import:ro` – Optionaler Read-Only Mount (z.B. NAS-Ordner mit bestehenden Patreon-Bundles), aus dem der Ordner-Scanner Modelle per Copy-on-Import übernimmt.
-
----
-
-## 🔑 Vorinstallierte Demo-Zugänge (Schnell-Login auf `/login`)
-
-| Benutzer | Rolle | E-Mail | Passwort |
-| :--- | :--- | :--- | :--- |
-| **Uke** | Admin & Drucker-Operator | `admin@druckkammer.local` | `Druckkammer!2026` |
-| **Andre** | Dungeon Master / Anforderer | `andre@druckkammer.local` | `Druckkammer!2026` |
-| **Marcel** | Abo-Sammler / Bibliotheks-Kurator | `marcel@druckkammer.local` | `Druckkammer!2026` |
-
-Vorinstallierter Einladungscode für neue Registrierungen: **`DND-GRUPPE-2026`** (`/register?invite=DND-GRUPPE-2026`).
 
 ---
 

@@ -65,7 +65,7 @@ builder.Services.AddRazorComponents()
 
 var app = builder.Build();
 
-// Initialize SQLite database, roles, permissions, and sample data
+// Initialize SQLite database, roles, and permissions
 await DatabaseInitializer.InitializeAsync(app.Services);
 
 if (!app.Environment.IsDevelopment())
@@ -78,15 +78,61 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
+// --- First-Run Admin Setup Endpoint ---
+app.MapPost("/auth/setup", async (
+    UserManager<ApplicationUser> userManager,
+    SignInManager<ApplicationUser> signInManager,
+    [FromForm] string displayName,
+    [FromForm] string email,
+    [FromForm] string password,
+    [FromForm] string? confirmPassword) =>
+{
+    // Setup ist nur möglich, solange noch kein einziger Benutzer existiert
+    if (await userManager.Users.AnyAsync())
+        return Results.Redirect("/login");
+
+    email = email?.Trim() ?? string.Empty;
+    displayName = displayName?.Trim() ?? string.Empty;
+
+    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(displayName))
+        return Results.Redirect("/setup?error=missing");
+
+    if (!string.IsNullOrEmpty(confirmPassword) && password != confirmPassword)
+        return Results.Redirect("/setup?error=mismatch");
+
+    if (password.Length < 6)
+        return Results.Redirect("/setup?error=short_password");
+
+    var adminUser = new ApplicationUser
+    {
+        UserName = email,
+        Email = email,
+        DisplayName = displayName,
+        AvatarColor = "#7E57C2",
+        EmailConfirmed = true,
+        IsApproved = true
+    };
+
+    var createResult = await userManager.CreateAsync(adminUser, password);
+    if (!createResult.Succeeded)
+        return Results.Redirect("/setup?error=invalid");
+
+    await userManager.AddToRolesAsync(adminUser, [AppRoles.Admin, AppRoles.Operator]);
+    await signInManager.SignInAsync(adminUser, isPersistent: true);
+    return Results.Redirect("/");
+}).DisableAntiforgery();
+
 // --- Auth Endpoints ---
 app.MapPost("/auth/login", async (
-    HttpContext ctx,
     SignInManager<ApplicationUser> signInManager,
     UserManager<ApplicationUser> userManager,
     [FromForm] string email,
     [FromForm] string password,
     [FromForm] string? returnUrl) =>
 {
+    if (!await userManager.Users.AnyAsync())
+        return Results.Redirect("/setup");
+
     var user = await userManager.FindByEmailAsync(email?.Trim() ?? string.Empty);
     if (user is null)
         return Results.Redirect("/login?error=invalid");
@@ -99,20 +145,6 @@ app.MapPost("/auth/login", async (
         return Results.Redirect("/login?error=invalid");
 
     return Results.Redirect(string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl);
-}).DisableAntiforgery();
-
-app.MapPost("/auth/quick-login", async (
-    SignInManager<ApplicationUser> signInManager,
-    UserManager<ApplicationUser> userManager,
-    [FromForm] string email) =>
-{
-    var user = await userManager.FindByEmailAsync(email);
-    if (user is not null && user.IsApproved)
-    {
-        await signInManager.SignInAsync(user, isPersistent: true);
-        return Results.Redirect("/");
-    }
-    return Results.Redirect("/login?error=invalid");
 }).DisableAntiforgery();
 
 app.MapPost("/auth/register", async (
@@ -130,6 +162,28 @@ app.MapPost("/auth/register", async (
 
     if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(displayName))
         return Results.Redirect("/register?error=missing");
+
+    // Falls noch kein Benutzer existiert, wird der allererste Benutzer automatisch Admin & Operator
+    bool isFirstUserEver = !await userManager.Users.AnyAsync();
+    if (isFirstUserEver)
+    {
+        var firstAdmin = new ApplicationUser
+        {
+            UserName = email,
+            Email = email,
+            DisplayName = displayName,
+            AvatarColor = "#7E57C2",
+            EmailConfirmed = true,
+            IsApproved = true
+        };
+        var firstResult = await userManager.CreateAsync(firstAdmin, password);
+        if (!firstResult.Succeeded)
+            return Results.Redirect("/setup?error=short_password");
+
+        await userManager.AddToRolesAsync(firstAdmin, [AppRoles.Admin, AppRoles.Operator]);
+        await signInManager.SignInAsync(firstAdmin, isPersistent: true);
+        return Results.Redirect("/");
+    }
 
     if (await userManager.FindByEmailAsync(email) is not null)
         return Results.Redirect("/register?error=exists");
@@ -236,6 +290,7 @@ app.MapGet("/api/batches/{batchId:int}/zip", async (
         .Include(b => b.Requests)
             .ThenInclude(r => r.ModelItem)
                 .ThenInclude(m => m!.Files)
+        .AsSplitQuery()
         .AsNoTracking()
         .FirstOrDefaultAsync(b => b.Id == batchId);
 

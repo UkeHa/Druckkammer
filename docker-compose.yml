@@ -12,8 +12,6 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - Druckkammer__DataDirectory=/data
       - Druckkammer__ImportDirectory=/import
-      - Druckkammer__AdminEmail=admin@druckkammer.local
-      - Druckkammer__AdminInitialPassword=Druckkammer!2026
     volumes:
       # Verwalteter App-Speicher (SQLite Datenbank, kopierte Modelle, Thumbnails, Makes-Fotos)
       - ./data:/data
