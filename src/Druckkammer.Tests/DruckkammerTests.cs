@@ -340,4 +340,54 @@ public class DruckkammerTests
                 File.Delete(tempDbPath);
         }
     }
+
+    [Fact]
+    public async Task MultiModelZipSplitterAndExposureProfile_ShouldWorkAsExpected()
+    {
+        string m1 = ManagedStorageService.GetLogicalModelNameFromZipPath("2026-10_Goblin_Cave/Goblin_Shaman/Presupported/shaman_32mm.stl", "Goblin Cave");
+        string m2 = ManagedStorageService.GetLogicalModelNameFromZipPath("2026-10_Goblin_Cave/Spider_Rider_Boss/Bases/scenic_base.stl", "Goblin Cave");
+
+        Assert.Equal("Goblin Shaman", m1);
+        Assert.Equal("Spider Rider Boss", m2);
+
+        string tempDbPath = Path.Combine(Path.GetTempPath(), $"DruckkammerExpTest_{Guid.NewGuid():N}.db");
+        try
+        {
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite($"Data Source={tempDbPath}")
+                .Options;
+
+            await using var db = new ApplicationDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+
+            var printer = new Printer { Name = "Saturn 4 Ultra", Technology = PrintingTechnology.ResinSLA };
+            var material = new Material { Name = "ABS-Like Pro 2", Brand = "Sunlu", Technology = PrintingTechnology.ResinSLA };
+            db.Printers.Add(printer);
+            db.Materials.Add(material);
+            await db.SaveChangesAsync();
+
+            db.ExposureProfiles.Add(new ExposureProfile
+            {
+                PrinterId = printer.Id,
+                MaterialId = material.Id,
+                ProfileName = "0.03mm High-Detail",
+                LayerHeightMm = 0.03,
+                NormalExposureSeconds = 1.9,
+                BottomExposureSeconds = 28.0,
+                BottomLayersCount = 5
+            });
+            await db.SaveChangesAsync();
+
+            var saved = await db.ExposureProfiles.Include(e => e.Printer).Include(e => e.Material).FirstOrDefaultAsync();
+            Assert.NotNull(saved);
+            Assert.Equal("0.03mm High-Detail", saved.ProfileName);
+            Assert.Equal(1.9, saved.NormalExposureSeconds);
+            Assert.Equal("Saturn 4 Ultra", saved.Printer?.Name);
+        }
+        finally
+        {
+            if (File.Exists(tempDbPath))
+                File.Delete(tempDbPath);
+        }
+    }
 }

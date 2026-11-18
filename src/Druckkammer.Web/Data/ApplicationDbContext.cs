@@ -23,6 +23,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     public DbSet<Printer> Printers => Set<Printer>();
     public DbSet<Material> Materials => Set<Material>();
+    public DbSet<ExposureProfile> ExposureProfiles => Set<ExposureProfile>();
     public DbSet<PrintOrder> PrintOrders => Set<PrintOrder>();
     public DbSet<PrintBatch> PrintBatches => Set<PrintBatch>();
     public DbSet<PrintRequest> PrintRequests => Set<PrintRequest>();

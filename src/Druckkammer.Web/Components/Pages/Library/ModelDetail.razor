@@ -5,6 +5,7 @@
 @inject UserContextService UserContext
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>@(_model?.Title ?? "Modell-Details") – Druckkammer</PageTitle>
 
@@ -33,7 +34,14 @@ else
             </div>
         </div>
 
-        <div class="d-flex gap-2">
+        <div class="d-flex flex-wrap gap-2">
+            @if (_currentUser.HasPermission(AppPermissions.LibraryManageModels))
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Edit"
+                           OnClick="@(() => _showCuratorEditor = !_showCuratorEditor)">
+                    @(_showCuratorEditor ? "Editor schließen" : "Modell & Zuordnung bearbeiten")
+                </MudButton>
+            }
             @if (!string.IsNullOrWhiteSpace(_model.ExternalSourceUrl))
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.OpenInNew"
@@ -48,6 +56,76 @@ else
             </MudButton>
         </div>
     </div>
+
+    <!-- Kuratoren-Editor (Metadaten, Collections, Tags & Löschen) -->
+    @if (_showCuratorEditor && _currentUser.HasPermission(AppPermissions.LibraryManageModels))
+    {
+        <MudPaper Elevation="3" Class="pa-4 mb-4" Style="border-left: 4px solid #26A69A;">
+            <div class="d-flex justify-space-between align-center mb-3">
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">✏️ Kuratoren-Editor: Modell, Collections &amp; Tags bearbeiten</MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.DeleteForever"
+                           OnClick="DeleteEntireModelAsync">
+                    Modell löschen
+                </MudButton>
+            </div>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="5">
+                    <MudTextField @bind-Value="_editTitle" Label="Modellname" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudTextField @bind-Value="_editStudio" Label="Creator / Studio" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="2">
+                    <MudTextField @bind-Value="_editRelease" Label="Release (z.B. 2026-10)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="2">
+                    <MudSelect T="TabletopScaleSize" @bind-Value="_editScaleSize" Label="Kreaturengröße" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="TabletopScaleSize.Tiny">Tiny (&lt;20mm)</MudSelectItem>
+                        <MudSelectItem Value="TabletopScaleSize.SmallMedium">32mm Medium</MudSelectItem>
+                        <MudSelectItem Value="TabletopScaleSize.Large">50mm Large</MudSelectItem>
+                        <MudSelectItem Value="TabletopScaleSize.Huge">75mm Huge</MudSelectItem>
+                        <MudSelectItem Value="TabletopScaleSize.Gargantuan">100mm+ Boss</MudSelectItem>
+                        <MudSelectItem Value="TabletopScaleSize.TerrainScenery">Terrain</MudSelectItem>
+                        <MudSelectItem Value="TabletopScaleSize.BustDisplay">75mm Büste</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int" MultiSelection="true" @bind-SelectedValues="_editCollectionIds"
+                               Label="Zugeordnete Collections" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="@(id => _allCollections.FirstOrDefault(c => c.Id == id)?.Name ?? id.ToString())">
+                        @foreach (var c in _allCollections)
+                        {
+                            <MudSelectItem T="int" Value="@c.Id">@c.CreatorStudio — @c.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int" MultiSelection="true" @bind-SelectedValues="_editTagIds"
+                               Label="Zugeordnete Tags" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="@(id => _allTags.FirstOrDefault(t => t.Id == id)?.Name ?? id.ToString())">
+                        @foreach (var t in _allTags)
+                        {
+                            <MudSelectItem T="int" Value="@t.Id">#@t.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12" sm="9">
+                    <MudTextField @bind-Value="_editDescription" Label="Beschreibung" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="3" Class="d-flex justify-end align-center gap-2">
+                    <MudButton Variant="Variant.Text" OnClick="@(() => _showCuratorEditor = false)">Abbrechen</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="SaveCuratorMetadataAsync">
+                        Änderungen speichern
+                    </MudButton>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+    }
 
     <MudGrid Spacing="3">
         <!-- Linke Spalte: Interaktiver 3D-Viewer & Dateien / Slicer-Tresor -->
@@ -64,7 +142,7 @@ else
                     <div class="d-flex align-center gap-2">
                         <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" />
                         <MudText Typo="Typo.h6" Style="font-weight: 700;">
-                            Enthaltene Dateien & Slicer-Tresor (@_model.Files.Count)
+                            Enthaltene Dateien &amp; Slicer-Tresor (@_model.Files.Count)
                         </MudText>
                     </div>
 
@@ -72,12 +150,13 @@ else
                     {
                         <MudFileUpload T="IBrowserFile" FilesChanged="OnAdditionalFileUploadedAsync"
                                        Accept=".stl,.obj,.3mf,.lys,.lyt,.chitubox,.ctb,.goo,.gcode,.png,.jpg">
-                            <ActivatorContent>
+                            <CustomContent Context="fileUpload">
                                 <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small"
-                                           StartIcon="@Icons.Material.Filled.UploadFile">
+                                           StartIcon="@Icons.Material.Filled.UploadFile"
+                                           OnClick="@fileUpload.OpenFilePickerAsync">
                                     Slicer-Datei (.lys/.ctb) oder Variante hinzufügen
                                 </MudButton>
-                            </ActivatorContent>
+                            </CustomContent>
                         </MudFileUpload>
                     }
                 </div>
@@ -126,6 +205,11 @@ else
                                 <td style="text-align: right;">
                                     <MudIconButton Icon="@Icons.Material.Filled.Download" Color="Color.Primary" Size="Size.Small"
                                                    Href="@($"/api/files/{f.Id}/download")" Target="_blank" />
+                                    @if (_currentUser.HasPermission(AppPermissions.LibraryManageModels) && _model.Files.Count > 1)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Color="Color.Error" Size="Size.Small"
+                                                       OnClick="@(() => DeleteModelFileAsync(f.Id))" />
+                                    }
                                 </td>
                             </tr>
                         }
@@ -140,7 +224,7 @@ else
             <MudPaper Elevation="2" Class="pa-4 mb-4">
                 <div class="d-flex align-center gap-2 mb-2">
                     <MudIcon Icon="@Icons.Material.Filled.Traffic" Color="Color.Warning" />
-                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Printability-Ampel & Druck-Erfahrung</MudText>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Printability-Ampel &amp; Druck-Erfahrung</MudText>
                 </div>
 
                 @if (!string.IsNullOrWhiteSpace(_model.Description))
@@ -168,10 +252,10 @@ else
                 </div>
             </MudPaper>
 
-            <!-- Collections & Tags Zuordnung -->
+            <!-- Collections & Tags Zuordnung + Schnell-Tag-Erstellung -->
             <MudPaper Elevation="2" Class="pa-4 mb-4">
-                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Collections & Tags</MudText>
-                <div class="mb-2">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Collections &amp; Tags</MudText>
+                <div class="mb-3">
                     <MudText Typo="Typo.caption" Style="opacity: 0.7;">Enthalten in Collections:</MudText>
                     <div class="d-flex flex-wrap gap-1 mt-1">
                         @foreach (var mc in _model.Collections)
@@ -199,6 +283,16 @@ else
                         }
                     </div>
                 </div>
+
+                @if (_currentUser.HasPermission(AppPermissions.LibraryManageModels))
+                {
+                    <div class="d-flex gap-2 align-center mt-3 pt-2" style="border-top: 1px solid rgba(255,255,255,0.08);">
+                        <MudTextField @bind-Value="_quickNewTagName" Placeholder="Neuen Tag hinzufügen (z.B. Drache)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="CreateAndAttachQuickTagAsync">
+                            + Tag
+                        </MudButton>
+                    </div>
+                }
             </MudPaper>
 
             <!-- Makes & Bemal-Galerie am Modell -->
@@ -206,7 +300,7 @@ else
                 <div class="d-flex justify-space-between align-center mb-3">
                     <div class="d-flex align-center gap-2">
                         <MudIcon Icon="@Icons.Material.Filled.PhotoCamera" Color="Color.Info" />
-                        <MudText Typo="Typo.h6" Style="font-weight: 700;">Makes & Bemal-Galerie (@_model.Makes.Count)</MudText>
+                        <MudText Typo="Typo.h6" Style="font-weight: 700;">Makes &amp; Bemal-Galerie (@_model.Makes.Count)</MudText>
                     </div>
                 </div>
 
@@ -245,11 +339,12 @@ else
                 <div class="d-flex justify-space-between align-center">
                     <MudCheckBox T="bool" @bind-Value="_newMakeIsPainted" Label="🎨 Figur ist bereits fertig bemalt" Color="Color.Success" Dense="true" />
                     <MudFileUpload T="IBrowserFile" FilesChanged="UploadMakePhotoAsync" Accept=".png,.jpg,.jpeg,.webp">
-                        <ActivatorContent>
-                            <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddAPhoto">
+                        <CustomContent Context="fileUpload">
+                            <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddAPhoto"
+                                       OnClick="@fileUpload.OpenFilePickerAsync">
                                 Foto hochladen
                             </MudButton>
-                        </ActivatorContent>
+                        </CustomContent>
                     </MudFileUpload>
                 </div>
             </MudPaper>
@@ -262,6 +357,19 @@ else
 
     private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
     private ModelItem? _model;
+    private List<Collection> _allCollections = [];
+    private List<Tag> _allTags = [];
+
+    private bool _showCuratorEditor;
+    private string _editTitle = string.Empty;
+    private string _editStudio = string.Empty;
+    private string _editRelease = string.Empty;
+    private string _editDescription = string.Empty;
+    private TabletopScaleSize _editScaleSize;
+    private IReadOnlyCollection<int> _editCollectionIds = [];
+    private IReadOnlyCollection<int> _editTagIds = [];
+    private string _quickNewTagName = string.Empty;
+
     private PrintabilityStatus _editPrintability;
     private string _editPrintabilityNotes = string.Empty;
 
@@ -282,11 +390,23 @@ else
             .Include(m => m.Collections).ThenInclude(mc => mc.Collection)
             .Include(m => m.Tags).ThenInclude(mt => mt.Tag)
             .Include(m => m.Makes)
+            .AsSplitQuery()
             .AsNoTracking()
             .FirstOrDefaultAsync(m => m.Id == Id);
 
+        _allCollections = await db.Collections.OrderBy(c => c.CreatorStudio).ThenBy(c => c.Name).AsNoTracking().ToListAsync();
+        _allTags = await db.Tags.OrderBy(t => t.Name).AsNoTracking().ToListAsync();
+
         if (_model is not null)
         {
+            _editTitle = _model.Title;
+            _editStudio = _model.CreatorStudio;
+            _editRelease = _model.ReleaseMonth;
+            _editDescription = _model.Description;
+            _editScaleSize = _model.ScaleSize;
+            _editCollectionIds = _model.Collections.Select(c => c.CollectionId).ToList();
+            _editTagIds = _model.Tags.Select(t => t.TagId).ToList();
+
             _editPrintability = _model.Printability;
             _editPrintabilityNotes = _model.PrintabilityNotes;
         }
@@ -296,6 +416,98 @@ else
     {
         if (_model is not null)
             _model.ThumbnailPath = newRelPath;
+    }
+
+    private async Task SaveCuratorMetadataAsync()
+    {
+        if (_model is null || string.IsNullOrWhiteSpace(_editTitle)) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.ModelItems
+            .Include(m => m.Collections)
+            .Include(m => m.Tags)
+            .FirstOrDefaultAsync(m => m.Id == _model.Id);
+
+        if (entity is null) return;
+
+        entity.Title = _editTitle.Trim();
+        entity.Slug = ManagedStorageService.Slugify(_editTitle);
+        entity.CreatorStudio = _editStudio.Trim();
+        entity.ReleaseMonth = _editRelease.Trim();
+        entity.Description = _editDescription.Trim();
+        entity.ScaleSize = _editScaleSize;
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        entity.Collections.Clear();
+        foreach (var cid in _editCollectionIds.Distinct())
+        {
+            entity.Collections.Add(new ModelCollectionMap { ModelItemId = entity.Id, CollectionId = cid });
+        }
+
+        entity.Tags.Clear();
+        foreach (var tid in _editTagIds.Distinct())
+        {
+            entity.Tags.Add(new ModelTagMap { ModelItemId = entity.Id, TagId = tid });
+        }
+
+        await db.SaveChangesAsync();
+        _showCuratorEditor = false;
+        await LoadModelAsync();
+        Snackbar.Add("Modell-Metadaten, Collections und Tags aktualisiert!", Severity.Success);
+    }
+
+    private async Task CreateAndAttachQuickTagAsync()
+    {
+        if (_model is null || string.IsNullOrWhiteSpace(_quickNewTagName)) return;
+        string cleanTag = _quickNewTagName.Trim().TrimStart('#');
+        if (string.IsNullOrWhiteSpace(cleanTag)) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var tag = await db.Tags.FirstOrDefaultAsync(t => t.Name.ToLower() == cleanTag.ToLower());
+        if (tag is null)
+        {
+            tag = new Tag { Name = cleanTag, ColorHex = "#26A69A" };
+            db.Tags.Add(tag);
+            await db.SaveChangesAsync();
+        }
+
+        if (!await db.ModelTagMaps.AnyAsync(mt => mt.ModelItemId == _model.Id && mt.TagId == tag.Id))
+        {
+            db.ModelTagMaps.Add(new ModelTagMap { ModelItemId = _model.Id, TagId = tag.Id });
+            await db.SaveChangesAsync();
+        }
+
+        _quickNewTagName = string.Empty;
+        await LoadModelAsync();
+        Snackbar.Add($"Tag '#{tag.Name}' verknüpft!", Severity.Success);
+    }
+
+    private async Task DeleteModelFileAsync(int fileId)
+    {
+        if (_model is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var file = await db.ModelFiles.FindAsync(fileId);
+        if (file is not null)
+        {
+            db.ModelFiles.Remove(file);
+            await db.SaveChangesAsync();
+            await LoadModelAsync();
+            Snackbar.Add($"Datei '{file.FileName}' entfernt.", Severity.Info);
+        }
+    }
+
+    private async Task DeleteEntireModelAsync()
+    {
+        if (_model is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.ModelItems.FindAsync(_model.Id);
+        if (entity is not null)
+        {
+            db.ModelItems.Remove(entity);
+            await db.SaveChangesAsync();
+            Snackbar.Add($"Modell '{entity.Title}' gelöscht.", Severity.Warning);
+            Nav.NavigateTo("/library");
+        }
     }
 
     private async Task SavePrintabilityAsync()

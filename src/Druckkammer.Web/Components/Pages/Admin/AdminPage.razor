@@ -6,6 +6,7 @@
 @inject UserManager<ApplicationUser> UserManager
 @inject RoleManager<IdentityRole> RoleManager
 @inject ManagedStorageService StorageService
+@inject LibraryScannerBackgroundService BackgroundScanner
 @inject NotificationService NotificationService
 @inject AuthConfigurationService AuthConfigService
 @inject UserContextService UserContext
@@ -18,9 +19,14 @@
     <div>
         <MudText Typo="Typo.h4" Style="font-weight: 800;">System-Administration &amp; Ordner-Scanner</MudText>
         <MudText Typo="Typo.body2" Style="opacity: 0.75;">
-            Verzeichnis-Scanner (Copy-on-Import + SHA-256 Deduplizierung), Benutzer &amp; 2FA, OpenID Connect (SSO), Rollen-Berechtigungen und Webhooks.
+            Verzeichnis-Scanner (Copy-on-Import + SHA-256 Deduplizierung), Benutzer &amp; 2FA, OpenID Connect (SSO), Rollen-Berechtigungen und Backup.
         </MudText>
     </div>
+
+    <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.Backup"
+               Href="/api/admin/backup-db" Target="_blank">
+        1-Klick Datenbank-Backup (.db)
+    </MudButton>
 </div>
 
 <MudTabs Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pt-4">
@@ -46,6 +52,23 @@
                     </MudButton>
                 </div>
             </div>
+
+            <!-- Automatischer Hintergrund-Scanner Einstellungen -->
+            <MudPaper Outlined="true" Class="pa-3 mb-3 d-flex flex-wrap justify-space-between align-center gap-3" Style="background: rgba(149,117,205,0.06);">
+                <div class="d-flex align-center gap-3">
+                    <MudSwitch T="bool" @bind-Value="_autoScanEnabled" Color="Color.Secondary"
+                               Label="⏱️ Automatischer Hintergrund-Ordnerscanner (BackgroundService)" />
+                    <MudNumericField T="int" @bind-Value="_autoScanIntervalMinutes" Min="1" Max="1440" Label="Intervall (Minuten)"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width: 150px;" />
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="SaveAutoScanSettingsAsync">
+                        Intervall speichern
+                    </MudButton>
+                </div>
+                <MudText Typo="Typo.caption" Style="opacity: 0.8;">
+                    Letzter Auto-Scan: @(BackgroundScanner.LastAutoScanAtUtc.HasValue ? BackgroundScanner.LastAutoScanAtUtc.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss") : "Noch nicht ausgeführt")
+                </MudText>
+            </MudPaper>
 
             @if (_lastScanResult is not null)
             {
@@ -351,6 +374,10 @@
     private string _newInviteDesc = "Einladung für Mitspieler";
     private string _newInviteRole = AppRoles.Requester;
 
+    // Hintergrund-Scanner Felder
+    private bool _autoScanEnabled;
+    private int _autoScanIntervalMinutes = 60;
+
     // OpenID Connect Felder
     private bool _oidcEnabled;
     private string _oidcProviderName = "OpenID Connect (SSO)";
@@ -377,6 +404,12 @@
         _users = await db.Users.OrderBy(u => u.DisplayName).AsNoTracking().ToListAsync();
         _inviteTokens = await db.InviteTokens.OrderByDescending(t => t.CreatedAt).AsNoTracking().ToListAsync();
         _webhooks = await db.NotificationWebhooks.OrderByDescending(w => w.CreatedAt).AsNoTracking().ToListAsync();
+
+        var autoScanEn = await db.SystemSettings.FindAsync("AutoScanEnabled");
+        var autoScanInt = await db.SystemSettings.FindAsync("AutoScanIntervalMinutes");
+        _autoScanEnabled = autoScanEn?.Value?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+        if (int.TryParse(autoScanInt?.Value, out int parsedMin) && parsedMin >= 1)
+            _autoScanIntervalMinutes = parsedMin;
 
         var oidc = await AuthConfigService.GetOidcConfigAsync();
         _oidcEnabled = oidc.Enabled;
@@ -409,6 +442,25 @@
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
             }
         }
+    }
+
+    private async Task SaveAutoScanSettingsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var sEn = await db.SystemSettings.FindAsync("AutoScanEnabled");
+        if (sEn is null)
+            db.SystemSettings.Add(new SystemSetting { Key = "AutoScanEnabled", Value = _autoScanEnabled ? "true" : "false", Description = "Hintergrund-Scanner aktiv" });
+        else
+            sEn.Value = _autoScanEnabled ? "true" : "false";
+
+        var sInt = await db.SystemSettings.FindAsync("AutoScanIntervalMinutes");
+        if (sInt is null)
+            db.SystemSettings.Add(new SystemSetting { Key = "AutoScanIntervalMinutes", Value = _autoScanIntervalMinutes.ToString(), Description = "Scan-Intervall (Min)" });
+        else
+            sInt.Value = _autoScanIntervalMinutes.ToString();
+
+        await db.SaveChangesAsync();
+        Snackbar.Add($"Hintergrund-Scanner Einstellungen gespeichert ({(_autoScanEnabled ? $"Aktiv alle {_autoScanIntervalMinutes} Min." : "Inaktiv")})!", Severity.Success);
     }
 
     private async Task SaveOidcConfigAsync()

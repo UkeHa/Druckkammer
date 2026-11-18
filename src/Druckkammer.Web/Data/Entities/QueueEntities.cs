@@ -272,3 +272,41 @@ public class PrintRequestComment
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// Resin-Belichtungsprofil (Slicer-Spickzettel) für eine spezifische Kombination aus Drucker und Resin/Material
+/// </summary>
+public class ExposureProfile
+{
+    public int Id { get; set; }
+
+    public int PrinterId { get; set; }
+    public Printer? Printer { get; set; }
+
+    public int MaterialId { get; set; }
+    public Material? Material { get; set; }
+
+    [Required, MaxLength(120)]
+    public string ProfileName { get; set; } = "0.03mm Standard";
+
+    public double LayerHeightMm { get; set; } = 0.03;
+
+    public double NormalExposureSeconds { get; set; } = 1.9;
+
+    public double BottomExposureSeconds { get; set; } = 28.0;
+
+    public int BottomLayersCount { get; set; } = 5;
+
+    public double LiftDistanceMm { get; set; } = 6.0;
+
+    public double LiftSpeedMmPerMin { get; set; } = 65.0;
+
+    public double RetractSpeedMmPerMin { get; set; } = 150.0;
+
+    public double LightOffDelaySeconds { get; set; } = 1.0;
+
+    [MaxLength(500)]
+    public string Notes { get; set; } = string.Empty;
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}

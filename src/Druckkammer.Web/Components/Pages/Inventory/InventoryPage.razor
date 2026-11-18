@@ -4,25 +4,25 @@
 @inject UserContextService UserContext
 @inject ISnackbar Snackbar
 
-<PageTitle>Drucker, Resins & Kaffeekasse – Druckkammer</PageTitle>
+<PageTitle>Drucker, Resins, Belichtungsprofile &amp; Kaffeekasse – Druckkammer</PageTitle>
 
 <div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h4" Style="font-weight: 800;">Werkstatt, Materialien & Kaffeekasse</MudText>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">Werkstatt, Belichtungsprofile &amp; Kaffeekasse</MudText>
         <MudText Typo="Typo.body2" Style="opacity: 0.75;">
-            Verwalte deine Resin-/FDM-Drucker, vorhandene Harze/Filamente und die freundschaftliche Unkosten-Übersicht.
+            Verwalte deine Resin-/FDM-Drucker, vorhandene Harze/Filamente, erprobte Slicer-Belichtungsprofile und die Kaffeekasse.
         </MudText>
     </div>
 </div>
 
-<MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+<MudTabs Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pt-4">
     <!-- Tab 1: Materialien (Resins & Filamente) -->
-    <MudTabPanel Text="🧪 Resins & Filamente" Icon="@Icons.Material.Filled.ColorLens">
+    <MudTabPanel Text="🧪 Resins &amp; Filamente" Icon="@Icons.Material.Filled.ColorLens">
         @if (_currentUser.HasPermission(AppPermissions.InventoryManage))
         {
             <MudPaper Elevation="2" Class="pa-4 mb-4">
                 <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Neues Resin / Filament eintragen</MudText>
-                <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+                <MudGrid Spacing="2">
                     <MudItem xs="12" sm="2">
                         <MudTextField @bind-Value="_matBrand" Label="Hersteller (z.B. Sunlu)" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
@@ -73,13 +73,119 @@
         </MudGrid>
     </MudTabPanel>
 
-    <!-- Tab 2: Drucker -->
+    <!-- Tab 2: Resin-Belichtungsprofile (Exposure Spickzettel pro Drucker & Resin) -->
+    <MudTabPanel Text="⏱️ Belichtungsprofile (Exposure)" Icon="@Icons.Material.Filled.Timer">
+        @if (_currentUser.HasPermission(AppPermissions.InventoryManage))
+        {
+            <MudPaper Elevation="2" Class="pa-4 mb-4" Style="border-left: 4px solid #26A69A;">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">
+                    Neues Slicer-Belichtungsprofil (Drucker + Resin Kombination) speichern
+                </MudText>
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" sm="3">
+                        <MudSelect T="int?" @bind-Value="_expPrinterId" Label="Drucker" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var p in _printers)
+                            {
+                                <MudSelectItem T="int?" Value="@p.Id">@p.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudSelect T="int?" @bind-Value="_expMaterialId" Label="Resin / Material" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var m in _materials)
+                            {
+                                <MudSelectItem T="int?" Value="@m.Id">@m.Brand @m.Name (@m.ColorName)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_expProfileName" Label="Profilname (z.B. 30µm High-Detail)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="6" sm="1">
+                        <MudNumericField T="double" @bind-Value="_expLayerMm" Step="0.005" Label="Layer (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="6" sm="2">
+                        <MudNumericField T="double" @bind-Value="_expNormalSec" Step="0.1" Label="Normal Exp. (s)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+
+                    <MudItem xs="6" sm="2">
+                        <MudNumericField T="double" @bind-Value="_expBottomSec" Step="1.0" Label="Bottom Exp. (s)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="6" sm="2">
+                        <MudNumericField T="int" @bind-Value="_expBottomLayers" Min="1" Max="20" Label="Bottom Layers" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="6" sm="2">
+                        <MudNumericField T="double" @bind-Value="_expLiftDist" Step="0.5" Label="Lift Dist. (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="6" sm="2">
+                        <MudNumericField T="double" @bind-Value="_expLiftSpeed" Step="5" Label="Lift (mm/min)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_expNotes" Label="Notiz (z.B. Raumtemp. >21°C)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="1">
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" FullWidth="true" OnClick="AddExposureProfileAsync">Speichern</MudButton>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+
+        @if (_exposureProfiles.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">
+                Noch keine Belichtungsprofile hinterlegt. Speichere oben deine erprobten Lychee-/Chitubox-Werte – sie werden auf der Buildplate automatisch eingeblendet!
+            </MudAlert>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                <thead>
+                    <tr>
+                        <th>Drucker &amp; Resin</th>
+                        <th>Profilname</th>
+                        <th>Layerhöhe</th>
+                        <th>Normal Exposure</th>
+                        <th>Bottom Exposure</th>
+                        <th>Lift (Distanz / Speed)</th>
+                        <th>Hinweis</th>
+                        <th style="text-align: right;">Löschen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var ep in _exposureProfiles)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@(ep.Printer?.Name ?? "Drucker")</strong>
+                                <MudText Typo="Typo.caption" Class="d-block">@(ep.Material is not null ? $"{ep.Material.Brand} {ep.Material.Name} ({ep.Material.ColorName})" : "Resin")</MudText>
+                            </td>
+                            <td><MudChip T="string" Size="Size.Small" Color="Color.Secondary">@ep.ProfileName</MudChip></td>
+                            <td><strong>@ep.LayerHeightMm.ToString("F3") mm</strong></td>
+                            <td><MudChip T="string" Size="Size.Small" Color="Color.Primary">@ep.NormalExposureSeconds.ToString("F2") s</MudChip></td>
+                            <td>@ep.BottomExposureSeconds.ToString("F1") s (@(ep.BottomLayersCount)x)</td>
+                            <td>@ep.LiftDistanceMm.ToString("F1") mm @("@") @ep.LiftSpeedMmPerMin.ToString("F0") mm/min</td>
+                            <td>@ep.Notes</td>
+                            <td style="text-align: right;">
+                                @if (_currentUser.HasPermission(AppPermissions.InventoryManage))
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => DeleteExposureProfileAsync(ep.Id))" />
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudTabPanel>
+
+    <!-- Tab 3: Drucker -->
     <MudTabPanel Text="🖨️ 3D-Drucker" Icon="@Icons.Material.Filled.Print">
         @if (_currentUser.HasPermission(AppPermissions.InventoryManage))
         {
             <MudPaper Elevation="2" Class="pa-4 mb-4">
                 <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Neuen Drucker anlegen</MudText>
-                <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+                <MudGrid Spacing="2">
                     <MudItem xs="12" sm="3">
                         <MudTextField @bind-Value="_printerName" Label="Spitzname" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
@@ -123,10 +229,10 @@
         </MudGrid>
     </MudTabPanel>
 
-    <!-- Tab 3: Kaffeekasse / Unkosten-Übersicht -->
-    <MudTabPanel Text="☕ Kaffeekasse & Unkosten" Icon="@Icons.Material.Filled.Savings">
+    <!-- Tab 4: Kaffeekasse / Unkosten-Übersicht -->
+    <MudTabPanel Text="☕ Kaffeekasse &amp; Unkosten" Icon="@Icons.Material.Filled.Savings">
         <MudPaper Elevation="2" Class="pa-4">
-            <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-1">Freundschaftliche Material- & Unkosten-Übersicht</MudText>
+            <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-1">Freundschaftliche Material- &amp; Unkosten-Übersicht</MudText>
             <MudText Typo="Typo.body2" Class="mb-4" Style="opacity: 0.75;">
                 Berechnet aus dem tatsächlichen STL-Volumen (inkl. Support-/IPA-Aufschlag) und dem hinterlegten Resin-/Filamentpreis.
             </MudText>
@@ -182,6 +288,7 @@
     private CurrentUserInfo _currentUser = new(false, "", "", "Gast", "#78909C", false, [], []);
     private List<Material> _materials = [];
     private List<Printer> _printers = [];
+    private List<ExposureProfile> _exposureProfiles = [];
     private List<PrintRequest> _requests = [];
 
     private string _matBrand = "Sunlu";
@@ -189,6 +296,17 @@
     private string _matColorName = "Grau";
     private decimal _matPrice = 22.90m;
     private double _matStock = 1000;
+
+    private int? _expPrinterId;
+    private int? _expMaterialId;
+    private string _expProfileName = "0.03mm Standard High-Detail";
+    private double _expLayerMm = 0.03;
+    private double _expNormalSec = 1.9;
+    private double _expBottomSec = 28.0;
+    private int _expBottomLayers = 5;
+    private double _expLiftDist = 6.0;
+    private double _expLiftSpeed = 65.0;
+    private string _expNotes = string.Empty;
 
     private string _printerName = string.Empty;
     private string _printerModel = string.Empty;
@@ -206,7 +324,16 @@
         await using var db = await DbFactory.CreateDbContextAsync();
         _materials = await db.Materials.OrderBy(m => m.Technology).ThenBy(m => m.Name).AsNoTracking().ToListAsync();
         _printers = await db.Printers.AsNoTracking().ToListAsync();
+        _exposureProfiles = await db.ExposureProfiles
+            .Include(e => e.Printer)
+            .Include(e => e.Material)
+            .OrderByDescending(e => e.UpdatedAt)
+            .AsNoTracking()
+            .ToListAsync();
         _requests = await db.PrintRequests.AsNoTracking().ToListAsync();
+
+        _expPrinterId ??= _printers.FirstOrDefault()?.Id;
+        _expMaterialId ??= _materials.FirstOrDefault()?.Id;
     }
 
     private async Task AddMaterialAsync()
@@ -225,6 +352,47 @@
         _matName = string.Empty;
         await LoadInventoryAsync();
         Snackbar.Add("Material hinzugefügt!", Severity.Success);
+    }
+
+    private async Task AddExposureProfileAsync()
+    {
+        if (!_expPrinterId.HasValue || !_expMaterialId.HasValue)
+        {
+            Snackbar.Add("Bitte zuerst mindestens einen Drucker und ein Material anlegen und auswählen.", Severity.Warning);
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.ExposureProfiles.Add(new ExposureProfile
+        {
+            PrinterId = _expPrinterId.Value,
+            MaterialId = _expMaterialId.Value,
+            ProfileName = string.IsNullOrWhiteSpace(_expProfileName) ? "Standard" : _expProfileName.Trim(),
+            LayerHeightMm = _expLayerMm,
+            NormalExposureSeconds = _expNormalSec,
+            BottomExposureSeconds = _expBottomSec,
+            BottomLayersCount = _expBottomLayers,
+            LiftDistanceMm = _expLiftDist,
+            LiftSpeedMmPerMin = _expLiftSpeed,
+            Notes = _expNotes.Trim()
+        });
+        await db.SaveChangesAsync();
+        _expNotes = string.Empty;
+        await LoadInventoryAsync();
+        Snackbar.Add("Resin-Belichtungsprofil gespeichert!", Severity.Success);
+    }
+
+    private async Task DeleteExposureProfileAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var ep = await db.ExposureProfiles.FindAsync(id);
+        if (ep is not null)
+        {
+            db.ExposureProfiles.Remove(ep);
+            await db.SaveChangesAsync();
+            await LoadInventoryAsync();
+            Snackbar.Add("Belichtungsprofil gelöscht.", Severity.Info);
+        }
     }
 
     private async Task AddPrinterAsync()

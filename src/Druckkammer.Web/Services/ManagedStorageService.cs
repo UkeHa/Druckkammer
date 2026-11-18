@@ -359,6 +359,167 @@ public partial class ManagedStorageService
     }
 
     /// <summary>
+    /// Multi-Modell-ZIP-Splitter: Entpackt ein großes Monats-ZIP-Bundle mit mehreren Unterordnern und legt automatisch
+    /// für jeden erkannten Figur-Unterordner ein eigenes ModelItem innerhalb der Ziel-Collection an.
+    /// </summary>
+    public async Task<List<ModelItem>> ImportMultiModelZipBundleAsync(
+        Stream zipStream,
+        string zipFileName,
+        string? bundleTitle,
+        string creatorStudio,
+        string releaseMonth,
+        int? collectionId,
+        List<int> tagIds,
+        TabletopScaleSize defaultScaleSize,
+        string? userId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        string cleanStudio = string.IsNullOrWhiteSpace(creatorStudio) ? "Unbekanntes Studio" : creatorStudio.Trim();
+        string cleanBundleTitle = !string.IsNullOrWhiteSpace(bundleTitle)
+            ? bundleTitle.Trim()
+            : CleanVariantLabel(Path.GetFileNameWithoutExtension(zipFileName), "Monats-Bundle");
+
+        Collection? targetCollection = null;
+        if (collectionId.HasValue)
+        {
+            targetCollection = await db.Collections.FindAsync(collectionId.Value);
+        }
+
+        if (targetCollection is null)
+        {
+            targetCollection = await db.Collections.FirstOrDefaultAsync(c => c.Name == cleanBundleTitle && c.CreatorStudio == cleanStudio);
+            if (targetCollection is null)
+            {
+                targetCollection = new Collection
+                {
+                    Name = cleanBundleTitle,
+                    Slug = Slugify(cleanBundleTitle),
+                    CreatorStudio = cleanStudio,
+                    ReleaseIdentifier = releaseMonth?.Trim() ?? string.Empty,
+                    IsCuratedBundle = true,
+                    CreatedByUserId = userId
+                };
+                db.Collections.Add(targetCollection);
+                await db.SaveChangesAsync();
+            }
+        }
+
+        using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read, leaveOpen: true);
+        var validEntries = archive.Entries
+            .Where(e => !string.IsNullOrWhiteSpace(e.Name) && !e.Name.StartsWith('.') && !e.FullName.Contains("__MACOSX"))
+            .Where(e => IsSupportedExtension(Path.GetExtension(e.Name).ToLowerInvariant()))
+            .ToList();
+
+        // Gruppiere ZIP-Einträge nach logischem Modell-Unterordner
+        var groupedEntries = validEntries.GroupBy(e => GetLogicalModelNameFromZipPath(e.FullName, cleanBundleTitle)).ToList();
+        var createdModels = new List<ModelItem>();
+
+        foreach (var group in groupedEntries)
+        {
+            string modelTitle = group.Key;
+            var model = new ModelItem
+            {
+                Title = modelTitle,
+                Slug = Slugify(modelTitle),
+                CreatorStudio = cleanStudio,
+                ReleaseMonth = releaseMonth?.Trim() ?? string.Empty,
+                ScaleSize = defaultScaleSize,
+                NativeScaleMm = defaultScaleSize is TabletopScaleSize.BustDisplay or TabletopScaleSize.Huge ? 75.0 : 32.0,
+                CreatedByUserId = userId
+            };
+
+            foreach (var entry in group)
+            {
+                string folderContext = Path.GetDirectoryName(entry.FullName) ?? string.Empty;
+                await using var entryStream = entry.Open();
+                var stored = await StoreModelFileStreamAsync(
+                    entryStream,
+                    entry.Name,
+                    cleanStudio,
+                    targetCollection.Name,
+                    model.Title,
+                    folderContext,
+                    checkDuplicateInDb: true);
+
+                AttachStoredFileToModel(model, entry.Name, stored, targetCollection);
+            }
+
+            if (model.Files.Count == 0)
+                continue;
+
+            FinalizeModelMetrics(model);
+            model.Collections.Add(new ModelCollectionMap { CollectionId = targetCollection.Id });
+
+            foreach (var tagId in tagIds.Distinct())
+            {
+                model.Tags.Add(new ModelTagMap { TagId = tagId });
+            }
+
+            db.ModelItems.Add(model);
+            createdModels.Add(model);
+        }
+
+        await db.SaveChangesAsync();
+        return createdModels;
+    }
+
+    public static string GetLogicalModelNameFromZipPath(string entryFullName, string fallbackBundleName)
+    {
+        string? dir = Path.GetDirectoryName(entryFullName)?.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            return FormatReadableName(Path.GetFileNameWithoutExtension(entryFullName));
+        }
+
+        var parts = dir.Split('/', StringSplitOptions.RemoveEmptyEntries).ToList();
+        var technicalKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "supported", "presupported", "pre-supported", "unsupported", "un-supported",
+            "bases", "base", "renders", "images", "photos", "lychee", "chitubox", "stl", "32mm", "75mm", "parts"
+        };
+
+        while (parts.Count > 1 && technicalKeywords.Contains(parts[^1]))
+        {
+            parts.RemoveAt(parts.Count - 1);
+        }
+
+        if (parts.Count == 1 && technicalKeywords.Contains(parts[0]))
+        {
+            return FormatReadableName(Path.GetFileNameWithoutExtension(entryFullName));
+        }
+
+        return FormatReadableName(parts[^1]);
+    }
+
+    /// <summary>
+    /// Erzeugt ein konsistentes SQLite-Datenbank-Backup mittels VACUUM INTO und gibt die Datei als Byte-Array zurück.
+    /// </summary>
+    public async Task<byte[]> CreateSqliteBackupBytesAsync()
+    {
+        EnsureDirectoriesExist();
+        string tempBackupFile = Path.Combine(TempRoot, $"druckkammer_backup_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}.db");
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            string escapedPath = tempBackupFile.Replace("'", "''");
+#pragma warning disable EF1002
+            await db.Database.ExecuteSqlRawAsync(string.Concat("VACUUM INTO '", escapedPath, "';"));
+#pragma warning restore EF1002
+            return await File.ReadAllBytesAsync(tempBackupFile);
+        }
+        finally
+        {
+            if (File.Exists(tempBackupFile))
+            {
+                try { File.Delete(tempBackupFile); } catch { /* ignore */ }
+            }
+        }
+    }
+
+    /// <summary>
     /// Scannt das gemountete /import Verzeichnis (z.B. NAS-Ordner mit Patreon-Bundles), kopiert neue Dateien
     /// zerstörungsfrei in den verwalteten Speicher (/data/storage) und legt Collections, Modelle & Tags automatisch an.
     /// </summary>

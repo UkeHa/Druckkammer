@@ -104,18 +104,30 @@
     {
         if (firstRender && _activeFile is not null)
         {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/viewer3d.js");
-            await LoadActiveMeshIntoViewerAsync();
+            try
+            {
+                _dotNetRef = DotNetObjectReference.Create(this);
+                _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/viewer3d.js");
+                await LoadActiveMeshIntoViewerAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
         }
     }
 
     private async Task LoadActiveMeshIntoViewerAsync()
     {
         if (_jsModule is null || _activeFile is null) return;
-        string url = $"/media/{_activeFile.RelativeStoragePath}";
-        bool autoCapture = string.IsNullOrWhiteSpace(CurrentThumbnailPath);
-        await _jsModule.InvokeVoidAsync("initViewer", _containerId, url, _dotNetRef, autoCapture);
+        try
+        {
+            string url = $"/media/{_activeFile.RelativeStoragePath}";
+            bool autoCapture = string.IsNullOrWhiteSpace(CurrentThumbnailPath);
+            await _jsModule.InvokeVoidAsync("initViewer", _containerId, url, _dotNetRef, autoCapture);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
     }
 
     private async Task OnSelectFileChanged(int fileId)
@@ -129,29 +141,44 @@
     {
         _wireframe = !_wireframe;
         if (_jsModule is not null)
-            await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, false);
+        {
+            try { await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, false); }
+            catch (JSDisconnectedException) { }
+        }
     }
 
     private async Task ToggleAutoRotateAsync()
     {
         _autoRotate = !_autoRotate;
         if (_jsModule is not null)
-            await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, false);
+        {
+            try { await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, false); }
+            catch (JSDisconnectedException) { }
+        }
     }
 
     private async Task ResetCameraAsync()
     {
         if (_jsModule is not null)
-            await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, true);
+        {
+            try { await _jsModule.InvokeVoidAsync("setViewerOptions", _containerId, _wireframe, _autoRotate, true); }
+            catch (JSDisconnectedException) { }
+        }
     }
 
     private async Task CaptureManualThumbnailAsync()
     {
         if (_jsModule is null) return;
-        var dataUrl = await _jsModule.InvokeAsync<string?>("captureSnapshotDataUrl", _containerId);
-        if (!string.IsNullOrWhiteSpace(dataUrl))
+        try
         {
-            await SaveDataUrlAsThumbnailAsync(dataUrl, showToast: true);
+            var dataUrl = await _jsModule.InvokeAsync<string?>("captureSnapshotDataUrl", _containerId);
+            if (!string.IsNullOrWhiteSpace(dataUrl))
+            {
+                await SaveDataUrlAsThumbnailAsync(dataUrl, showToast: true);
+            }
+        }
+        catch (JSDisconnectedException)
+        {
         }
     }
 

@@ -21,16 +21,17 @@
     <DialogContent>
         @if (PreselectedModel is null)
         {
-            <MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-3" @bind-ActivePanelIndex="_sourceTabIndex">
+            <MudTabs Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pt-3" @bind-ActivePanelIndex="_sourceTabIndex">
                 <MudTabPanel Text="Direkt-Upload (STL/ZIP)" Icon="@Icons.Material.Filled.UploadFile">
                     <MudPaper Outlined="true" Class="pa-3 mb-3" Style="border-style: dashed;">
                         <div class="d-flex flex-column align-center gap-2">
                             <MudFileUpload T="IBrowserFile" FilesChanged="OnDirectFileUploadedAsync" Accept=".stl,.obj,.3mf,.lys,.ctb,.zip">
-                                <ActivatorContent>
-                                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CloudUpload">
+                                <CustomContent Context="fileUpload">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CloudUpload"
+                                               OnClick="@fileUpload.OpenFilePickerAsync">
                                         3D-Druckdatei auswählen (.stl, .3mf, .obj, .lys)
                                     </MudButton>
-                                </ActivatorContent>
+                                </CustomContent>
                             </MudFileUpload>
                             @if (!string.IsNullOrWhiteSpace(_uploadedFileName))
                             {

@@ -53,6 +53,8 @@ builder.Services.AddMudServices();
 
 builder.Services.AddSingleton<StlAnalysisService>();
 builder.Services.AddSingleton<ManagedStorageService>();
+builder.Services.AddSingleton<LibraryScannerBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LibraryScannerBackgroundService>());
 builder.Services.AddScoped<OpenGraphService>();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<PrintQueueService>();
@@ -438,6 +440,18 @@ app.MapGet("/api/batches/{batchId:int}/zip", async (
     byte[] zipBytes = storage.CreateBatchSlicerZipArchive(batch);
     string zipFileName = $"Buildplate_{ManagedStorageService.Slugify(batch.BatchName, "batch")}.zip";
     return Results.File(zipBytes, "application/zip", zipFileName);
+});
+
+app.MapGet("/api/admin/backup-db", async (
+    HttpContext ctx,
+    ManagedStorageService storage) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    byte[] dbBytes = await storage.CreateSqliteBackupBytesAsync();
+    string fileName = $"druckkammer_backup_{DateTime.UtcNow:yyyy-MM-dd_HHmm}.db";
+    return Results.File(dbBytes, "application/x-sqlite3", fileName);
 });
 
 app.MapStaticAssets();

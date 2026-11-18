@@ -120,11 +120,12 @@
 
                     <div class="d-flex flex-wrap gap-2">
                         <MudFileUpload T="IBrowserFile" FilesChanged="UploadBundlePosterAsync" Accept=".png,.jpg,.jpeg,.webp">
-                            <ActivatorContent>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.Panorama">
+                            <CustomContent Context="fileUpload">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.Panorama"
+                                           OnClick="@fileUpload.OpenFilePickerAsync">
                                     Bundle-Poster hochladen
                                 </MudButton>
-                            </ActivatorContent>
+                            </CustomContent>
                         </MudFileUpload>
 
                         @if (_activeCollection.Models.Count > 0)
@@ -134,6 +135,11 @@
                                        OnClick="AddEntireCollectionToCartAsync">
                                 Alle @_activeCollection.Models.Count Modelle in Session-Warenkorb legen
                             </MudButton>
+                        }
+                        @if (_currentUser.HasPermission(AppPermissions.LibraryManageModels))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Color="Color.Error" Size="Size.Small"
+                                           OnClick="DeleteActiveCollectionAsync" />
                         }
                     </div>
                 </div>
@@ -315,5 +321,24 @@
         var parameters = new DialogParameters<CreateRequestDialog> { { x => x.PreselectedModel, model } };
         var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
         await DialogService.ShowAsync<CreateRequestDialog>("Druckwunsch anlegen", parameters, options);
+    }
+
+    private async Task DeleteActiveCollectionAsync()
+    {
+        if (_activeCollection is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var col = await db.Collections.FindAsync(_activeCollection.Id);
+        if (col is not null)
+        {
+            // Kinder-Collections auf Root heben, damit kein Restrict-Fehler auftritt
+            var children = await db.Collections.Where(c => c.ParentCollectionId == col.Id).ToListAsync();
+            foreach (var ch in children) ch.ParentCollectionId = col.ParentCollectionId;
+            db.Collections.Remove(col);
+            await db.SaveChangesAsync();
+            _activeCollection = null;
+            CollectionId = null;
+            await LoadCollectionsAsync();
+            Snackbar.Add("Collection gelöscht.", Severity.Info);
+        }
     }
 }

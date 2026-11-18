@@ -16,16 +16,17 @@
         </div>
     </TitleContent>
     <DialogContent>
-        <MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-3" @bind-ActivePanelIndex="_uploadMode">
+        <MudTabs Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pt-3" @bind-ActivePanelIndex="_uploadMode">
             <MudTabPanel Text="Einzeldateien (STL, LYS, Bilder)" Icon="@Icons.Material.Filled.InsertDriveFile">
                 <MudPaper Outlined="true" Class="pa-4 mb-3 text-center" Style="border-style: dashed;">
                     <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnMultiFilesSelected" MaximumFileCount="30"
                                    Accept=".stl,.obj,.3mf,.lys,.lyt,.chitubox,.ctb,.goo,.gcode,.png,.jpg,.jpeg,.webp,.pdf">
-                        <ActivatorContent>
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.LibraryAdd">
+                        <CustomContent Context="fileUpload">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.LibraryAdd"
+                                       OnClick="@fileUpload.OpenFilePickerAsync">
                                 Zugehörige Modell-Dateien auswählen (Supported, Unsupported, Base, Render-Bild)
                             </MudButton>
-                        </ActivatorContent>
+                        </CustomContent>
                     </MudFileUpload>
                     <MudText Typo="Typo.caption" Class="d-block mt-2" Style="color: #90A4AE;">
                         Dateien werden per SHA-256 gehasht und in den verwalteten Speicher kopiert.
@@ -45,11 +46,12 @@
             <MudTabPanel Text="Komplettes ZIP-Bundle" Icon="@Icons.Material.Filled.FolderZip">
                 <MudPaper Outlined="true" Class="pa-4 mb-3 text-center" Style="border-style: dashed;">
                     <MudFileUpload T="IBrowserFile" FilesChanged="OnZipFileSelected" Accept=".zip">
-                        <ActivatorContent>
-                            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Archive">
+                        <CustomContent Context="fileUpload">
+                            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Archive"
+                                       OnClick="@fileUpload.OpenFilePickerAsync">
                                 ZIP-Archiv auswählen (.zip)
                             </MudButton>
-                        </ActivatorContent>
+                        </CustomContent>
                     </MudFileUpload>
                     <MudText Typo="Typo.caption" Class="d-block mt-2" Style="color: #90A4AE;">
                         Entpackt automatisch Unterordner (Supported, Unsupported, Bases, Lychee, Renders) und berechnet das STL-Volumen.
@@ -60,13 +62,18 @@
                             📦 @_selectedZipFile.Name (@((_selectedZipFile.Size / (1024.0 * 1024.0)).ToString("F1")) MB)
                         </MudChip>
                     }
+                    <div class="d-flex justify-center mt-2">
+                        <MudCheckBox T="bool" @bind-Value="_splitZipIntoMultipleModels" Color="Color.Secondary" Dense="true"
+                                     Label="✨ Multi-Modell-ZIP-Splitter: Jeden Figuren-Unterordner im ZIP automatisch als eigenes Modell in dieser Collection anlegen" />
+                    </div>
                 </MudPaper>
             </MudTabPanel>
         </MudTabs>
 
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="8">
-                <MudTextField @bind-Value="_title" Label="Modellname" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                <MudTextField @bind-Value="_title" Label="@(_uploadMode == 1 && _splitZipIntoMultipleModels ? "Bundle- / Collection-Name" : "Modellname")"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudSelect T="TabletopScaleSize" @bind-Value="_scaleSize" Label="D&D / Tabletop-Größe" Variant="Variant.Outlined" Margin="Margin.Dense">
@@ -90,7 +97,7 @@
                 <MudSelect T="PrintingTechnology" @bind-Value="_recommendedTech" Label="Empf. Verfahren" Variant="Variant.Outlined" Margin="Margin.Dense">
                     <MudSelectItem Value="PrintingTechnology.ResinSLA">Resin (SLA/MSLA)</MudSelectItem>
                     <MudSelectItem Value="PrintingTechnology.FilamentFDM">Filament (FDM)</MudSelectItem>
-                    <MudSelectItem Value="PrintingTechnology.Both">Beides (Resin & FDM)</MudSelectItem>
+                    <MudSelectItem Value="PrintingTechnology.Both">Beides (Resin &amp; FDM)</MudSelectItem>
                 </MudSelect>
             </MudItem>
 
@@ -142,6 +149,7 @@
     private int _uploadMode;
     private IReadOnlyList<IBrowserFile> _selectedFiles = [];
     private IBrowserFile? _selectedZipFile;
+    private bool _splitZipIntoMultipleModels = true;
 
     private string _title = string.Empty;
     private string _creatorStudio = "Loot Studios";
@@ -203,7 +211,7 @@
     {
         if (string.IsNullOrWhiteSpace(_title))
         {
-            Snackbar.Add("Bitte einen Modellnamen eingeben.", Severity.Warning);
+            Snackbar.Add("Bitte einen Namen eingeben.", Severity.Warning);
             return;
         }
 
@@ -215,6 +223,25 @@
             if (_uploadMode == 1 && _selectedZipFile is not null)
             {
                 await using var zipStream = _selectedZipFile.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
+
+                if (_splitZipIntoMultipleModels)
+                {
+                    var importedList = await StorageService.ImportMultiModelZipBundleAsync(
+                        zipStream,
+                        _selectedZipFile.Name,
+                        _title,
+                        _creatorStudio,
+                        _releaseMonth,
+                        _selectedCollectionId,
+                        _selectedTagIds.ToList(),
+                        _scaleSize,
+                        user.UserId);
+
+                    Snackbar.Add($"Monats-ZIP aufgeteilt: {importedList.Count} Modelle erfolgreich in die Bibliothek importiert!", Severity.Success);
+                    MudDialog.Close(DialogResult.Ok(importedList.FirstOrDefault()));
+                    return;
+                }
+
                 var imported = await StorageService.ImportZipBundleAsModelAsync(
                     zipStream,
                     _selectedZipFile.Name,

@@ -26,7 +26,9 @@ public class UserContextService(
 {
     public async Task<CurrentUserInfo> GetCurrentUserAsync()
     {
+#pragma warning disable BL0013
         var state = await authStateProvider.GetAuthenticationStateAsync();
+#pragma warning restore BL0013
         var principal = state.User;
 
         if (principal.Identity?.IsAuthenticated != true)

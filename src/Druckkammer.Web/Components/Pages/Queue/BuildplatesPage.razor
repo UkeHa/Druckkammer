@@ -6,11 +6,11 @@
 @inject UserContextService UserContext
 @inject ISnackbar Snackbar
 
-<PageTitle>Buildplates & Druckläufe – Druckkammer</PageTitle>
+<PageTitle>Buildplates &amp; Druckläufe – Druckkammer</PageTitle>
 
 <div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h4" Style="font-weight: 800;">Buildplates & Druckläufe (Batching)</MudText>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">Buildplates &amp; Druckläufe (Batching)</MudText>
         <MudText Typo="Typo.body2" Style="opacity: 0.75;">
             Bündele offene Wünsche auf eine Druckplatte, lade alle STLs als Slicer-ZIP herunter und verbuche Teil-Fehldrucke mit einem Klick.
         </MudText>
@@ -42,7 +42,7 @@
             }
         </div>
 
-        <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+        <MudGrid Spacing="2">
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_batchName" Label="Bezeichnung der Buildplate" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
@@ -78,6 +78,7 @@
 <MudGrid Spacing="3">
     @foreach (var batch in _batches)
     {
+        var matchingProfile = _exposureProfiles.FirstOrDefault(e => e.PrinterId == batch.PrinterId && e.MaterialId == batch.MaterialId);
         <MudItem xs="12">
             <MudPaper Elevation="3" Class="pa-4" Style="border-radius: 12px;">
                 <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-3">
@@ -130,6 +131,18 @@
                     </div>
                 </div>
 
+                @if (matchingProfile is not null)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Icon="@Icons.Material.Filled.Timer" Class="mb-3">
+                        <strong>Slicer-Belichtungsprofil (@matchingProfile.ProfileName):</strong>
+                        Layer: <strong>@matchingProfile.LayerHeightMm.ToString("F3") mm</strong> ·
+                        Normal Exposure: <strong>@matchingProfile.NormalExposureSeconds.ToString("F2") s</strong> ·
+                        Bottom: <strong>@matchingProfile.BottomExposureSeconds.ToString("F1") s (@(matchingProfile.BottomLayersCount)x)</strong> ·
+                        Lift: <strong>@matchingProfile.LiftDistanceMm.ToString("F1") mm @("@") @matchingProfile.LiftSpeedMmPerMin.ToString("F0") mm/min</strong>
+                        @(!string.IsNullOrWhiteSpace(matchingProfile.Notes) ? $" ({matchingProfile.Notes})" : "")
+                    </MudAlert>
+                }
+
                 <!-- Enthaltene Wünsche auf dieser Platte -->
                 <MudSimpleTable Dense="true" Hover="true">
                     <thead>
@@ -179,11 +192,12 @@
                     {
                         <MudFileUpload T="IBrowserFile" FilesChanged="@((file) => UploadSlicedPlateFileAsync(batch, file))"
                                        Accept=".lys,.lyt,.chitubox,.ctb,.goo,.gcode,.3mf">
-                            <ActivatorContent>
-                                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.UploadFile">
+                            <CustomContent Context="fileUpload">
+                                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.UploadFile"
+                                           OnClick="@fileUpload.OpenFilePickerAsync">
                                     Plattendatei (.lys/.ctb) hinterlegen
                                 </MudButton>
-                            </ActivatorContent>
+                            </CustomContent>
                         </MudFileUpload>
                     }
                 </div>
@@ -200,7 +214,7 @@
             <div class="d-flex align-center gap-2 mb-2">
                 <MudIcon Icon="@Icons.Material.Filled.FactCheck" Color="Color.Success" Size="Size.Large" />
                 <div>
-                    <MudText Typo="Typo.h6" Style="font-weight: 800;">Buildplate abschließen & Teil-Fehldruck-Recovery</MudText>
+                    <MudText Typo="Typo.h6" Style="font-weight: 800;">Buildplate abschließen &amp; Teil-Fehldruck-Recovery</MudText>
                     <MudText Typo="Typo.caption" Style="opacity: 0.8;">
                         Gib an, wie viele Figuren pro Wunsch gelungen sind. Fehlgeschlagene Exemplare werden automatisch für die nächste Buildplate neu eingereiht!
                     </MudText>
@@ -256,7 +270,7 @@
                 <MudButton Variant="Variant.Text" OnClick="@(() => _completingBatch = null)">Abbrechen</MudButton>
                 <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.DoneAll"
                            OnClick="ConfirmBatchCompletionWithMisprintRecoveryAsync">
-                    Abschließen & Nachdrucke anlegen
+                    Abschließen &amp; Nachdrucke anlegen
                 </MudButton>
             </div>
         </MudPaper>
@@ -269,6 +283,7 @@
     private List<PrintRequest> _openRequests = [];
     private List<Printer> _printers = [];
     private List<Material> _materials = [];
+    private List<ExposureProfile> _exposureProfiles = [];
 
     private HashSet<int> _selectedIds = [];
     private string _batchName = $"Saturn 4 – Platte #{DateTime.Now:ddMM}";
@@ -296,6 +311,7 @@
             .Include(b => b.Material)
             .Include(b => b.Requests)
             .OrderByDescending(b => b.CreatedAt)
+            .AsSplitQuery()
             .AsNoTracking()
             .ToListAsync();
 
@@ -307,6 +323,7 @@
 
         _printers = await db.Printers.AsNoTracking().ToListAsync();
         _materials = await db.Materials.Where(m => m.IsAvailable).AsNoTracking().ToListAsync();
+        _exposureProfiles = await db.ExposureProfiles.AsNoTracking().ToListAsync();
 
         _printerId ??= _printers.FirstOrDefault()?.Id;
         _materialId ??= _materials.FirstOrDefault()?.Id;

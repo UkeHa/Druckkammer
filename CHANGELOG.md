@@ -5,6 +5,30 @@ Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1
 
 ---
 
+## [0.3.0] – 2026-11-18
+
+### Hinzugefügt (Added)
+- **Kuratoren-Editor & Tag-Manager**:
+  - Direktes Bearbeiten von Modell-Metadaten (*Titel*, *Creator/Studio*, *Release-Monat*, *Beschreibung*, *D&D-Kreaturengröße*) sowie Live-Zuordnung zu **Collections** und **Tags** auf der Modell-Detailseite ([`ModelDetail.razor`](src/Druckkammer.Web/Components/Pages/Library/ModelDetail.razor)).
+  - Löschen einzelner Dateien oder ganzer Modelle sowie Löschen von Collections ([`CollectionsPage.razor`](src/Druckkammer.Web/Components/Pages/Library/CollectionsPage.razor)).
+  - Integrierter **Tag-Manager** im Modell-Katalog ([`LibraryCatalog.razor`](src/Druckkammer.Web/Components/Pages/Library/LibraryCatalog.razor)) und Schnell-Tag-Anlage auf der Modell-Detailseite.
+- **Multi-Modell-ZIP-Splitter**:
+  - Neuer Modus beim ZIP-Bundle-Upload ([`UploadModelDialog.razor`](src/Druckkammer.Web/Components/Shared/UploadModelDialog.razor) & [`ManagedStorageService.cs`](src/Druckkammer.Web/Services/ManagedStorageService.cs)), der große Monats-Archive anhand ihrer Unterordner automatisch in mehrere eigenständige `ModelItem`-Einträge innerhalb einer gemeinsamen Collection aufteilt.
+- **Automatischer Hintergrund-Ordnerscanner (`BackgroundService`)**:
+  - Zeitgesteuerter [`LibraryScannerBackgroundService`](src/Druckkammer.Web/Services/LibraryScannerBackgroundService.cs) für periodische Scans des `/import`-Verzeichnisses (im Admin-Menü unter `/admin` aktivierbar mit frei wählbarem Minuten-Intervall und Anzeige des letzten automatischen Laufs).
+- **Resin-Belichtungsprofile (`ExposureProfile`)**:
+  - Speichern erprobter Slicer-Parameter (*Layerhöhe in mm*, *Normal Exposure in s*, *Bottom Exposure in s*, *Bottom Layers*, *Lift-Distanz & Speed*, *Notizen*) pro Drucker- und Resin-Kombination unter `/inventory` ([`InventoryPage.razor`](src/Druckkammer.Web/Components/Pages/Inventory/InventoryPage.razor)).
+  - Automatische Einblendung des passenden Belichtungs-Spickzettels direkt auf den Buildplates unter `/batches` ([`BuildplatesPage.razor`](src/Druckkammer.Web/Components/Pages/Queue/BuildplatesPage.razor)).
+- **Echtes Drag-&-Drop auf dem Kanban-Board (`MudDropContainer`)**:
+  - Druckwünsche lassen sich auf [`KanbanBoard.razor`](src/Druckkammer.Web/Components/Pages/Queue/KanbanBoard.razor) per Maus-Drag-&-Drop direkt zwischen den Status-Spalten verschieben.
+- **1-Klick SQLite-Datenbank-Backup**:
+  - Neuer Admin-Endpunkt (`/api/admin/backup-db`) und Download-Button in [`AdminPage.razor`](src/Druckkammer.Web/Components/Pages/Admin/AdminPage.razor), der im laufenden Betrieb mittels `VACUUM INTO` ein konsistentes SQLite-Backup erzeugt.
+
+### Behoben & Verbessert (Fixed)
+- Sämtliche MudBlazor-v9-Analyzer-Hinweise (`MUD0002`), EF-Core-SplitQuery-Hinweise und Blazor-JS-Interop-Guards bereinigt (**0 Compiler-Warnungen, 0 Fehler**).
+
+---
+
 ## [0.2.0] – 2026-11-18
 
 ### Hinzugefügt (Added)
