@@ -59,7 +59,9 @@ public static class DatabaseInitializer
                 new Tag { Name = "75mm Display", ColorHex = "#AB47BC" },
                 new Tag { Name = "Presupported", ColorHex = "#26A69A" },
                 new Tag { Name = "Boss", ColorHex = "#EF5350" },
-                new Tag { Name = "Terrain / Scenery", ColorHex = "#8D6E63" }
+                new Tag { Name = "Terrain / Scenery", ColorHex = "#8D6E63" },
+                new Tag { Name = "Goblin", ColorHex = "#66BB6A" },
+                new Tag { Name = "Untote", ColorHex = "#7E57C2" }
             );
             await db.SaveChangesAsync();
         }

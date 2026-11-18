@@ -4,6 +4,28 @@
 
 ---
 
+## 📸 Screenshots
+
+### Dashboard, Resin-Warteschlangen-Füllstand & Hall of Fame
+![Dashboard & Hall of Fame](docs/screenshots/dashboard.png)
+
+### 3D-Modell-Katalog mit D&D-Kreaturengrößen, Smart-Filtern & Printability-Ampel
+![3D-Modell-Katalog](docs/screenshots/library.png)
+
+### Modell-Detailansicht mit interaktivem 3D-STL-Viewer, Slicer-Tresor & Druck-Erfahrung
+![Modell-Detailansicht & 3D-Viewer](docs/screenshots/model-detail.png)
+
+### Druckjob-Kanban-Board (Vom Wunsch über die Buildplate bis zur Übergabe)
+![Kanban-Board](docs/screenshots/kanban.png)
+
+### Buildplate-Batching, Slicer-ZIP-Export & Teil-Fehldruck-Recovery
+![Buildplates & Druckläufe](docs/screenshots/buildplates.png)
+
+### Ersteinrichtung des Administrator-Accounts beim ersten Start (`/setup`)
+![Ersteinrichtung Admin-Account](docs/screenshots/setup.png)
+
+---
+
 ## ✨ Hauptfunktionen
 
 ### 1. Verwaltete 3D-Bibliothek & Copy-on-Import Speicher
