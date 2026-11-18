@@ -308,6 +308,105 @@ public class StlAnalysisService
         return TabletopScaleSize.Gargantuan;
     }
 
+    public record PrinterPreset(
+        string Label,
+        string ManufacturerModel,
+        PrintingTechnology Technology,
+        double BuildXMm,
+        double BuildYMm,
+        double BuildZMm);
+
+    public static readonly IReadOnlyList<PrinterPreset> CommonPrinterPresets =
+    [
+        new("Elegoo Saturn 4 Ultra (Resin)", "Elegoo Saturn 4 Ultra 16K", PrintingTechnology.ResinSLA, 218.8, 122.8, 220.0),
+        new("Elegoo Mars 5 Ultra (Resin)", "Elegoo Mars 5 Ultra 9K", PrintingTechnology.ResinSLA, 153.3, 77.7, 165.0),
+        new("Anycubic Photon Mono M7 Pro (Resin)", "Anycubic Photon Mono M7 Pro", PrintingTechnology.ResinSLA, 223.0, 126.0, 230.0),
+        new("Phrozen Sonic Mighty Revo (Resin)", "Phrozen Sonic Mighty Revo 14K", PrintingTechnology.ResinSLA, 223.0, 126.0, 235.0),
+        new("Bambu Lab P1S / X1C / A1 (FDM)", "Bambu Lab P1S / X1C", PrintingTechnology.FilamentFDM, 256.0, 256.0, 256.0),
+        new("Bambu Lab A1 Mini (FDM)", "Bambu Lab A1 Mini", PrintingTechnology.FilamentFDM, 180.0, 180.0, 180.0),
+        new("Prusa MK4S / Core One (FDM)", "Prusa MK4S", PrintingTechnology.FilamentFDM, 250.0, 210.0, 220.0)
+    ];
+
+    public record PrinterFitResult(
+        string PrinterName,
+        bool FitsBuildVolume,
+        bool RequiresRotation90,
+        bool ExceedsPlateXY,
+        bool ExceedsHeightZ,
+        double ScaledXMm,
+        double ScaledYMm,
+        double ScaledZMm,
+        double SingleItemPlateAreaPercent,
+        string StatusText);
+
+    /// <summary>
+    /// Prüft, ob ein (skaliertes) 3D-Modell auf die Druckplatte (X × Y) und in die Bauhöhe (Z) eines Druckers passt.
+    /// Berücksichtigt auch eine 90°-Drehung auf der X/Y-Druckplatte.
+    /// </summary>
+    public static PrinterFitResult CheckPrinterFit(
+        Printer printer,
+        double baseXMm,
+        double baseYMm,
+        double baseZMm,
+        double scalePercentage = 100.0,
+        int quantity = 1)
+    {
+        double ratio = Math.Max(0.01, scalePercentage / 100.0);
+        double sx = Math.Round((baseXMm > 0 ? baseXMm : 32.0) * ratio, 1);
+        double sy = Math.Round((baseYMm > 0 ? baseYMm : 32.0) * ratio, 1);
+        double sz = Math.Round((baseZMm > 0 ? baseZMm : 35.0) * ratio, 1);
+
+        bool fitsNormalXY = sx <= printer.BuildVolumeXMm && sy <= printer.BuildVolumeYMm;
+        bool fitsRotatedXY = sy <= printer.BuildVolumeXMm && sx <= printer.BuildVolumeYMm;
+        bool fitsXY = fitsNormalXY || fitsRotatedXY;
+        bool fitsZ = sz <= printer.BuildVolumeZMm;
+        bool fitsAll = fitsXY && fitsZ;
+
+        double plateAreaMm2 = Math.Max(1.0, printer.BuildVolumeXMm * printer.BuildVolumeYMm);
+        // 1.15 Faktor für Support-Raft / Mindestabstand auf der Druckplatte
+        double itemFootprintMm2 = (sx * sy * 1.15) * Math.Max(1, quantity);
+        double areaPct = Math.Round((itemFootprintMm2 / plateAreaMm2) * 100.0, 1);
+
+        string statusText;
+        if (!fitsZ && !fitsXY)
+        {
+            statusText = $"❌ Zu breit & zu hoch ({sx}×{sy}×{sz} mm > {printer.BuildVolumeXMm:F0}×{printer.BuildVolumeYMm:F0}×{printer.BuildVolumeZMm:F0} mm)";
+        }
+        else if (!fitsZ)
+        {
+            statusText = $"❌ Zu hoch für Z-Achse ({sz} mm > {printer.BuildVolumeZMm:F0} mm Max)";
+        }
+        else if (!fitsXY)
+        {
+            statusText = $"❌ Grundfläche zu groß für Druckplatte ({sx}×{sy} mm > {printer.BuildVolumeXMm:F0}×{printer.BuildVolumeYMm:F0} mm)";
+        }
+        else if (!fitsNormalXY && fitsRotatedXY)
+        {
+            statusText = $"🟡 Passt um 90° gedreht ({sx}×{sy}×{sz} mm · ca. {areaPct}% Plattenfläche)";
+        }
+        else if (areaPct > 100.0)
+        {
+            int platesNeeded = (int)Math.Ceiling(areaPct / 85.0);
+            statusText = $"🟡 Einzelmodell passt, Stückzahl ({quantity}x) benötigt ca. {platesNeeded} Platten ({areaPct:F0}% Fläche)";
+        }
+        else
+        {
+            statusText = $"🟢 Passt ({sx}×{sy}×{sz} mm · belegt ca. {areaPct}% der {printer.BuildVolumeXMm:F0}×{printer.BuildVolumeYMm:F0} mm Platte)";
+        }
+
+        return new PrinterFitResult(
+            PrinterName: printer.Name,
+            FitsBuildVolume: fitsAll,
+            RequiresRotation90: !fitsNormalXY && fitsRotatedXY,
+            ExceedsPlateXY: !fitsXY,
+            ExceedsHeightZ: !fitsZ,
+            ScaledXMm: sx,
+            ScaledYMm: sy,
+            ScaledZMm: sz,
+            SingleItemPlateAreaPercent: areaPct,
+            StatusText: statusText);
+    }
+
     /// <summary>
     /// Erzeugt eine valide binäre STL-Datei (Miniatur-Sockel + Kristall-Obelisk/Figur) für Demo-Modelle und Tests.
     /// </summary>

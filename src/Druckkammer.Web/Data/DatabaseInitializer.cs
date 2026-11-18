@@ -37,6 +37,16 @@ public static class DatabaseInitializer
             );
             """);
 
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync("""ALTER TABLE "Printers" ADD COLUMN "OwnerUserId" TEXT NULL;""");
+            await db.Database.ExecuteSqlRawAsync("""ALTER TABLE "Printers" ADD COLUMN "OwnerDisplayName" TEXT NOT NULL DEFAULT '';""");
+        }
+        catch
+        {
+            // Spalten existieren bereits
+        }
+
         // 1. Standardrollen & granulare Permissions anlegen
         foreach (var roleName in AppRoles.All)
         {

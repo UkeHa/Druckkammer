@@ -390,4 +390,32 @@ public class DruckkammerTests
                 File.Delete(tempDbPath);
         }
     }
+
+    [Fact]
+    public void PrinterFitCheck_ShouldDetectDirectRotatedAndOversizedModels()
+    {
+        var marsPrinter = new Printer
+        {
+            Name = "Mars 5 Ultra",
+            Technology = PrintingTechnology.ResinSLA,
+            BuildVolumeXMm = 153.0,
+            BuildVolumeYMm = 77.0,
+            BuildVolumeZMm = 165.0
+        };
+
+        // 1. Standard 32mm Mini (32x32x38mm) fits directly
+        var fitNormal = StlAnalysisService.CheckPrinterFit(marsPrinter, 32, 32, 38, scalePercentage: 100);
+        Assert.True(fitNormal.FitsBuildVolume);
+        Assert.False(fitNormal.RequiresRotation90);
+
+        // 2. Terrain piece (65x120x50mm) exceeds Y=77mm in normal orientation, but fits when rotated 90° (120 <= 153 and 65 <= 77)
+        var fitRotated = StlAnalysisService.CheckPrinterFit(marsPrinter, 65, 120, 50, scalePercentage: 100);
+        Assert.True(fitRotated.FitsBuildVolume);
+        Assert.True(fitRotated.RequiresRotation90);
+
+        // 3. Upscaled Boss (200% of 95mm Z = 190mm > 165mm Z-limit)
+        var fitTooTall = StlAnalysisService.CheckPrinterFit(marsPrinter, 40, 40, 95, scalePercentage: 200);
+        Assert.False(fitTooTall.FitsBuildVolume);
+        Assert.True(fitTooTall.ExceedsHeightZ);
+    }
 }

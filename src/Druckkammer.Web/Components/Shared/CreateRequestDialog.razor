@@ -117,13 +117,33 @@
                         </MudItem>
                         <MudItem xs="12" sm="4">
                             <div class="d-flex flex-column justify-center" style="height: 100%;">
-                                <MudText Typo="Typo.caption" Style="color: #90A4AE;">Kubischer Volumen-Faktor:</MudText>
+                                <MudText Typo="Typo.caption" Style="color: #90A4AE;">Skalierte Maße &amp; Volumen:</MudText>
                                 <MudText Typo="Typo.body2" Style="font-weight: 600;">
-                                    @((Math.Pow(_scalePct / 100.0, 3)).ToString("F2"))x Volumen (@EstimatedTotalVolumeMl.ToString("F1") ml inkl. Supports)
+                                    @ScaledXMm.ToString("F0")×@ScaledYMm.ToString("F0")×@ScaledZMm.ToString("F0") mm · @EstimatedTotalVolumeMl.ToString("F1") ml
                                 </MudText>
                             </div>
                         </MudItem>
                     </MudGrid>
+
+                    @if (_printers.Count > 0)
+                    {
+                        <div class="mt-2 pt-2" style="border-top: 1px solid rgba(255,255,255,0.08);">
+                            <MudText Typo="Typo.caption" Style="opacity: 0.8;" Class="d-block mb-1">
+                                🖨️ Live Bauraum- &amp; Druckplatten-Check für deine eingerichteten Drucker:
+                            </MudText>
+                            <div class="d-flex flex-wrap gap-1">
+                                @foreach (var p in _printers)
+                                {
+                                    var fit = StlAnalysisService.CheckPrinterFit(p, _nativeXMm, _nativeYMm, _nativeHeightMm, _scalePct, _quantity);
+                                    <MudChip T="string" Size="Size.Small"
+                                             Color="@(!fit.FitsBuildVolume ? Color.Error : (fit.RequiresRotation90 || fit.SingleItemPlateAreaPercent > 100 ? Color.Warning : Color.Success))"
+                                             Variant="Variant.Outlined">
+                                        @p.Name: @fit.StatusText
+                                    </MudChip>
+                                }
+                            </div>
+                        </div>
+                    }
                 </MudPaper>
             </MudItem>
 
@@ -196,9 +216,15 @@
     private int _quantity = 1;
     private int? _selectedFileId;
     private double _scalePct = 100.0;
+    private double _nativeXMm = 32.0;
+    private double _nativeYMm = 32.0;
     private double _nativeHeightMm = 35.0;
     private double _targetHeightMm = 35.0;
     private double _baseVolumeCm3 = 6.5;
+
+    private double ScaledXMm => Math.Round(_nativeXMm * (_scalePct / 100.0), 1);
+    private double ScaledYMm => Math.Round(_nativeYMm * (_scalePct / 100.0), 1);
+    private double ScaledZMm => Math.Round(_nativeHeightMm * (_scalePct / 100.0), 1);
 
     private int? _preferredMaterialId;
     private PrintingTechnology _preferredTech = PrintingTechnology.ResinSLA;
@@ -216,6 +242,7 @@
     private bool _isSaving;
 
     private List<Material> _materials = [];
+    private List<Printer> _printers = [];
 
     private double EstimatedTotalVolumeMl =>
         StlAnalysisService.CalculateEstimatedTotalVolumeMl(_baseVolumeCm3, _quantity, _scalePct);
@@ -235,12 +262,15 @@
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         _materials = await db.Materials.Where(m => m.IsAvailable).OrderBy(m => m.Technology).ThenBy(m => m.Name).ToListAsync();
+        _printers = await db.Printers.OrderBy(p => p.Technology).ThenBy(p => p.Name).AsNoTracking().ToListAsync();
         _preferredMaterialId = _materials.FirstOrDefault()?.Id;
 
         if (PreselectedModel is not null)
         {
             _title = PreselectedModel.Title;
             _baseVolumeCm3 = PreselectedModel.EstimatedVolumeCm3 > 0 ? PreselectedModel.EstimatedVolumeCm3 : 6.5;
+            _nativeXMm = PreselectedModel.BoundingBoxXMm > 0 ? PreselectedModel.BoundingBoxXMm : 32.0;
+            _nativeYMm = PreselectedModel.BoundingBoxYMm > 0 ? PreselectedModel.BoundingBoxYMm : 32.0;
             _nativeHeightMm = PreselectedModel.BoundingBoxZMm > 0 ? PreselectedModel.BoundingBoxZMm : 36.0;
             _targetHeightMm = _nativeHeightMm;
             _preferredTech = PreselectedModel.RecommendedTech == PrintingTechnology.FilamentFDM ? PrintingTechnology.FilamentFDM : PrintingTechnology.ResinSLA;
@@ -253,6 +283,8 @@
             {
                 _selectedFileId = preferredFile.Id;
                 if (preferredFile.VolumeCm3 > 0) _baseVolumeCm3 = preferredFile.VolumeCm3;
+                if (preferredFile.DimXMm > 0) _nativeXMm = preferredFile.DimXMm;
+                if (preferredFile.DimYMm > 0) _nativeYMm = preferredFile.DimYMm;
                 if (preferredFile.DimZMm > 0)
                 {
                     _nativeHeightMm = preferredFile.DimZMm;

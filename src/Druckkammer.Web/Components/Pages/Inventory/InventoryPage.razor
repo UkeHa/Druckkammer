@@ -184,13 +184,21 @@
         @if (_currentUser.HasPermission(AppPermissions.InventoryManage))
         {
             <MudPaper Elevation="2" Class="pa-4 mb-4">
-                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">Neuen Drucker anlegen</MudText>
+                <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-2">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">Neuen Drucker (Resin SLA oder Filament FDM) anlegen</MudText>
+                    <MudSelect T="string" ValueChanged="ApplyPrinterPreset" Label="⚡ Schnell-Vorlage laden" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Style="min-width: 280px;">
+                        @foreach (var preset in StlAnalysisService.CommonPrinterPresets)
+                        {
+                            <MudSelectItem Value="@preset.Label">@preset.Label (@preset.BuildXMm×@preset.BuildYMm×@preset.BuildZMm mm)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
                 <MudGrid Spacing="2">
                     <MudItem xs="12" sm="3">
                         <MudTextField @bind-Value="_printerName" Label="Spitzname" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
-                    <MudItem xs="12" sm="3">
-                        <MudTextField @bind-Value="_printerModel" Label="Modell (z.B. Elegoo Mars 5 Ultra)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <MudItem xs="12" sm="2">
+                        <MudTextField @bind-Value="_printerModel" Label="Modell" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" sm="2">
                         <MudSelect T="PrintingTechnology" @bind-Value="_printerTech" Label="Verfahren" Variant="Variant.Outlined" Margin="Margin.Dense">
@@ -198,8 +206,14 @@
                             <MudSelectItem Value="PrintingTechnology.FilamentFDM">Filament FDM</MudSelectItem>
                         </MudSelect>
                     </MudItem>
-                    <MudItem xs="12" sm="2">
-                        <MudNumericField T="double" @bind-Value="_printerX" Label="Bauraum X (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <MudItem xs="4" sm="1">
+                        <MudNumericField T="double" @bind-Value="_printerX" Label="Platte X (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="4" sm="1">
+                        <MudNumericField T="double" @bind-Value="_printerY" Label="Platte Y (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="4" sm="1">
+                        <MudNumericField T="double" @bind-Value="_printerZ" Label="Höhe Z (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" sm="2">
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="AddPrinterAsync">Hinzufügen</MudButton>
@@ -311,7 +325,23 @@
     private string _printerName = string.Empty;
     private string _printerModel = string.Empty;
     private PrintingTechnology _printerTech = PrintingTechnology.ResinSLA;
-    private double _printerX = 218;
+    private double _printerX = 218.8;
+    private double _printerY = 122.8;
+    private double _printerZ = 220.0;
+
+    private void ApplyPrinterPreset(string? presetLabel)
+    {
+        var preset = StlAnalysisService.CommonPrinterPresets.FirstOrDefault(p => p.Label == presetLabel);
+        if (preset is not null)
+        {
+            _printerName = preset.Label;
+            _printerModel = preset.ManufacturerModel;
+            _printerTech = preset.Technology;
+            _printerX = preset.BuildXMm;
+            _printerY = preset.BuildYMm;
+            _printerZ = preset.BuildZMm;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -404,9 +434,11 @@
             Name = _printerName.Trim(),
             ManufacturerModel = _printerModel.Trim(),
             Technology = _printerTech,
-            BuildVolumeXMm = _printerX,
-            BuildVolumeYMm = 122,
-            BuildVolumeZMm = 220
+            BuildVolumeXMm = Math.Max(10, _printerX),
+            BuildVolumeYMm = Math.Max(10, _printerY),
+            BuildVolumeZMm = Math.Max(10, _printerZ),
+            OwnerUserId = _currentUser.UserId,
+            OwnerDisplayName = _currentUser.DisplayName
         });
         await db.SaveChangesAsync();
         _printerName = string.Empty;

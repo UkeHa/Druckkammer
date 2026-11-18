@@ -1,27 +1,126 @@
 @page "/account/security"
+@page "/account"
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject UserManager<ApplicationUser> UserManager
 @inject UserContextService UserContext
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 
-<PageTitle>Konto-Sicherheit &amp; 2FA (TOTP) – Druckkammer</PageTitle>
+<PageTitle>Mein Profil, Meine Drucker &amp; 2FA – Druckkammer</PageTitle>
 
 <div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h4" Style="font-weight: 800;">🔐 Konto-Sicherheit, TOTP 2FA &amp; SSO</MudText>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">👤 Mein Profil, Meine 3D-Drucker &amp; 2FA-Sicherheit</MudText>
         <MudText Typo="Typo.body2" Style="opacity: 0.75;">
-            Richte eine Zwei-Faktor-Authentifizierung (TOTP) per Authenticator-App für dein Benutzerkonto ein.
+            Hinterlege deine Resin- und FDM-Drucker (inkl. Druckplatten- &amp; Bauraumgröße X×Y×Z) und verwalte deine Zwei-Faktor-Authentifizierung.
         </MudText>
     </div>
 </div>
 
 @if (_user is null)
 {
-    <MudAlert Severity="Severity.Warning">Bitte melde dich zuerst an, um deine Sicherheitseinstellungen zu verwalten.</MudAlert>
+    <MudAlert Severity="Severity.Warning">Bitte melde dich zuerst an, um dein Profil zu verwalten.</MudAlert>
 }
 else
 {
+    <!-- Sektion 1: Meine 3D-Drucker (FDM & Resin) mit Druckplatten- und Bauraummaßen -->
+    <MudPaper Elevation="3" Class="pa-5 mb-5" Style="border-left: 4px solid #9575CD;">
+        <div class="d-flex flex-wrap justify-space-between align-center gap-2 mb-3">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.Print" Color="Color.Primary" Size="Size.Large" />
+                <div>
+                    <MudText Typo="Typo.h6" Style="font-weight: 800;">🖨️ Meine 3D-Drucker (Resin SLA &amp; Filament FDM)</MudText>
+                    <MudText Typo="Typo.caption" Style="opacity: 0.8;">
+                        Anhand von Druckplatten-Fläche (X × Y) und Bauhöhe (Z) prüft Druckkammer bei Modellen, Skalierungen und Buildplates automatisch, ob alles passt.
+                    </MudText>
+                </div>
+            </div>
+
+            <MudSelect T="string" Value="_selectedPresetLabel" ValueChanged="ApplyPrinterPreset"
+                       Label="⚡ Schnell-Vorlage (Bekannte Drucker-Maße laden)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Clearable="true" Style="min-width: 310px;">
+                @foreach (var preset in StlAnalysisService.CommonPrinterPresets)
+                {
+                    <MudSelectItem Value="@preset.Label">
+                        @preset.Label (@preset.BuildXMm×@preset.BuildYMm×@preset.BuildZMm mm)
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        <MudGrid Spacing="2" Class="mb-4">
+            <MudItem xs="12" sm="3">
+                <MudTextField @bind-Value="_newPrinterName" Label="Spitzname (z.B. Mein Saturn 4)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudTextField @bind-Value="_newPrinterModel" Label="Hersteller & Modell" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="2">
+                <MudSelect T="PrintingTechnology" @bind-Value="_newPrinterTech" Label="Verfahren" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="PrintingTechnology.ResinSLA">Resin (SLA/MSLA)</MudSelectItem>
+                    <MudSelectItem Value="PrintingTechnology.FilamentFDM">Filament (FDM)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="4" sm="1">
+                <MudNumericField T="double" @bind-Value="_newPrinterX" Min="20" Max="1000" Label="Platte X (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="4" sm="1">
+                <MudNumericField T="double" @bind-Value="_newPrinterY" Min="20" Max="1000" Label="Platte Y (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="4" sm="1">
+                <MudNumericField T="double" @bind-Value="_newPrinterZ" Min="20" Max="1000" Label="Höhe Z (mm)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="1" Class="d-flex align-center">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="SaveMyPrinterAsync">
+                    + Drucker
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+
+        @if (_printers.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">
+                Noch kein Drucker eingerichtet. Wähle oben rechts eine Schnell-Vorlage (z.B. Elegoo Saturn 4 Ultra oder Bambu Lab P1S) oder gib deine Bauraum-Maße (X × Y × Z in mm) ein!
+            </MudAlert>
+        }
+        else
+        {
+            <MudGrid Spacing="2">
+                @foreach (var p in _printers)
+                {
+                    double plateCm2 = Math.Round((p.BuildVolumeXMm * p.BuildVolumeYMm) / 100.0, 1);
+                    double volumeLiters = Math.Round((p.BuildVolumeXMm * p.BuildVolumeYMm * p.BuildVolumeZMm) / 1_000_000.0, 2);
+                    <MudItem xs="12" sm="6" md="4">
+                        <MudPaper Outlined="true" Class="pa-3" Style="background: rgba(255,255,255,0.02);">
+                            <div class="d-flex justify-space-between align-start">
+                                <div>
+                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@p.Name</MudText>
+                                    <MudText Typo="Typo.caption" Style="opacity: 0.75;">
+                                        @p.ManufacturerModel @(!string.IsNullOrWhiteSpace(p.OwnerDisplayName) ? $"· 👤 {p.OwnerDisplayName}" : "")
+                                    </MudText>
+                                </div>
+                                <div class="d-flex align-center gap-1">
+                                    <MudChip T="string" Size="Size.Small" Color="@(p.Technology == PrintingTechnology.ResinSLA ? Color.Secondary : Color.Info)">
+                                        @(p.Technology == PrintingTechnology.ResinSLA ? "Resin SLA" : "FDM")
+                                    </MudChip>
+                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => DeletePrinterAsync(p.Id))" />
+                                </div>
+                            </div>
+
+                            <div class="mt-2 pt-2 d-flex flex-wrap justify-space-between" style="border-top: 1px solid rgba(255,255,255,0.08); font-size: 0.8rem;">
+                                <span>📐 Druckplatte: <strong>@p.BuildVolumeXMm.ToString("F1") × @p.BuildVolumeYMm.ToString("F1") mm</strong> (@plateCm2 cm²)</span>
+                                <span>⬆️ Max. Z-Höhe: <strong>@p.BuildVolumeZMm.ToString("F0") mm</strong> (@volumeLiters L)</span>
+                            </div>
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </MudPaper>
+
     <MudGrid Spacing="3">
         <!-- Linke Spalte: TOTP 2FA Status & Einrichtung -->
         <MudItem xs="12" md="7">
@@ -154,6 +253,16 @@ else
 
 @code {
     private ApplicationUser? _user;
+    private List<Printer> _printers = [];
+
+    private string? _selectedPresetLabel;
+    private string _newPrinterName = "Resin-Drucker (Saturn 4)";
+    private string _newPrinterModel = "Elegoo Saturn 4 Ultra 16K";
+    private PrintingTechnology _newPrinterTech = PrintingTechnology.ResinSLA;
+    private double _newPrinterX = 218.8;
+    private double _newPrinterY = 122.8;
+    private double _newPrinterZ = 220.0;
+
     private bool _is2faEnabled;
     private string _formattedKey = string.Empty;
     private string _qrCodeSvg = string.Empty;
@@ -171,6 +280,62 @@ else
         }
 
         await LoadSecurityStateAsync(current.UserId);
+        await LoadPrintersAsync();
+    }
+
+    private async Task LoadPrintersAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _printers = await db.Printers.OrderBy(p => p.Technology).ThenBy(p => p.Name).AsNoTracking().ToListAsync();
+    }
+
+    private void ApplyPrinterPreset(string? presetLabel)
+    {
+        _selectedPresetLabel = presetLabel;
+        var preset = StlAnalysisService.CommonPrinterPresets.FirstOrDefault(p => p.Label == presetLabel);
+        if (preset is not null)
+        {
+            _newPrinterName = preset.Label;
+            _newPrinterModel = preset.ManufacturerModel;
+            _newPrinterTech = preset.Technology;
+            _newPrinterX = preset.BuildXMm;
+            _newPrinterY = preset.BuildYMm;
+            _newPrinterZ = preset.BuildZMm;
+        }
+    }
+
+    private async Task SaveMyPrinterAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newPrinterName) || _user is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Printers.Add(new Printer
+        {
+            Name = _newPrinterName.Trim(),
+            ManufacturerModel = _newPrinterModel.Trim(),
+            Technology = _newPrinterTech,
+            BuildVolumeXMm = Math.Max(10, _newPrinterX),
+            BuildVolumeYMm = Math.Max(10, _newPrinterY),
+            BuildVolumeZMm = Math.Max(10, _newPrinterZ),
+            OwnerUserId = _user.Id,
+            OwnerDisplayName = _user.DisplayName,
+            Notes = $"Eingerichtet im Profil von {_user.DisplayName}"
+        });
+        await db.SaveChangesAsync();
+        await LoadPrintersAsync();
+        Snackbar.Add($"Drucker '{_newPrinterName}' ({_newPrinterX}×{_newPrinterY}×{_newPrinterZ} mm) gespeichert!", Severity.Success);
+    }
+
+    private async Task DeletePrinterAsync(int printerId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var p = await db.Printers.FindAsync(printerId);
+        if (p is not null)
+        {
+            db.Printers.Remove(p);
+            await db.SaveChangesAsync();
+            await LoadPrintersAsync();
+            Snackbar.Add($"Drucker '{p.Name}' entfernt.", Severity.Info);
+        }
     }
 
     private async Task LoadSecurityStateAsync(string userId)

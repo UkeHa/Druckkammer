@@ -71,6 +71,34 @@
                 </MudButton>
             </MudItem>
         </MudGrid>
+
+        @if (SelectedPrinter is not null)
+        {
+            <div class="mt-3 pt-2" style="border-top: 1px solid rgba(255,255,255,0.08);">
+                <div class="d-flex flex-wrap justify-space-between align-center mb-1">
+                    <MudText Typo="Typo.caption">
+                        📐 Druckplatten-Belegung auf <strong>@SelectedPrinter.Name (@SelectedPrinter.BuildVolumeXMm.ToString("F0")×@SelectedPrinter.BuildVolumeYMm.ToString("F0")×@SelectedPrinter.BuildVolumeZMm.ToString("F0") mm)</strong>:
+                        <strong>@SelectedPlateAreaPercent.ToString("F1")% Fläche</strong> ·
+                        ⬆️ Höchste Figur: <strong>@SelectedMaxZMm.ToString("F0") / @SelectedPrinter.BuildVolumeZMm.ToString("F0") mm Z-Limit</strong>
+                    </MudText>
+                    @if (SelectedMaxZMm > SelectedPrinter.BuildVolumeZMm || SelectedPlateAreaPercent > 100)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">
+                            ⚠️ Überschreitet Druckplatte oder Z-Bauhöhe!
+                        </MudChip>
+                    }
+                    else if (_selectedIds.Count > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success">
+                            ✓ Passt auf die Druckplatte
+                        </MudChip>
+                    }
+                </div>
+                <MudProgressLinear Value="@Math.Min(100, SelectedPlateAreaPercent)"
+                                   Color="@(SelectedPlateAreaPercent > 95 ? Color.Error : (SelectedPlateAreaPercent > 75 ? Color.Warning : Color.Secondary))"
+                                   Rounded="true" Size="Size.Medium" />
+            </div>
+        }
     </MudPaper>
 }
 
@@ -297,6 +325,42 @@
     private double SelectedVolumeMl =>
         _openRequests.Where(r => _selectedIds.Contains(r.Id)).Sum(r => r.EstimatedTotalVolumeMl);
 
+    private Printer? SelectedPrinter => _printers.FirstOrDefault(p => p.Id == _printerId);
+
+    private double SelectedPlateAreaPercent
+    {
+        get
+        {
+            var p = SelectedPrinter;
+            if (p is null || _selectedIds.Count == 0) return 0;
+            double totalPct = 0;
+            foreach (var r in _openRequests.Where(x => _selectedIds.Contains(x.Id)))
+            {
+                double bx = r.ModelItem?.BoundingBoxXMm > 0 ? r.ModelItem.BoundingBoxXMm : 32.0;
+                double by = r.ModelItem?.BoundingBoxYMm > 0 ? r.ModelItem.BoundingBoxYMm : 32.0;
+                double bz = r.ModelItem?.BoundingBoxZMm > 0 ? r.ModelItem.BoundingBoxZMm : 35.0;
+                var fit = StlAnalysisService.CheckPrinterFit(p, bx, by, bz, r.ScalePercentage, r.QuantityRequested);
+                totalPct += fit.SingleItemPlateAreaPercent;
+            }
+            return Math.Round(totalPct, 1);
+        }
+    }
+
+    private double SelectedMaxZMm
+    {
+        get
+        {
+            if (_selectedIds.Count == 0) return 0;
+            double maxZ = 0;
+            foreach (var r in _openRequests.Where(x => _selectedIds.Contains(x.Id)))
+            {
+                double bz = r.TargetHeightMm ?? (r.ModelItem?.BoundingBoxZMm > 0 ? r.ModelItem.BoundingBoxZMm * (r.ScalePercentage / 100.0) : 35.0 * (r.ScalePercentage / 100.0));
+                if (bz > maxZ) maxZ = bz;
+            }
+            return Math.Round(maxZ, 1);
+        }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         _currentUser = await UserContext.GetCurrentUserAsync();
@@ -316,6 +380,7 @@
             .ToListAsync();
 
         _openRequests = await db.PrintRequests
+            .Include(r => r.ModelItem)
             .Where(r => r.Status == PrintRequestStatus.RequestedOpen)
             .OrderByDescending(r => r.Priority)
             .AsNoTracking()

@@ -57,6 +57,12 @@ public class Printer
 
     public PrinterStatus Status { get; set; } = PrinterStatus.IdleReady;
 
+    [MaxLength(100)]
+    public string? OwnerUserId { get; set; }
+
+    [MaxLength(100)]
+    public string OwnerDisplayName { get; set; } = string.Empty;
+
     [MaxLength(500)]
     public string Notes { get; set; } = string.Empty;
 }
