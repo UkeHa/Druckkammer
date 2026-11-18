@@ -49,8 +49,10 @@
 - **Teil-Fehldruck-Recovery**: Sind auf einer Platte z.B. 6 von 8 Figuren gelungen, werden die 2 fehlgeschlagenen Exemplare beim Plattenabschluss automatisch als Nachdruck für die nächste Buildplate neu eingereiht.
 - **Kaffeekasse & Hall of Fame**: Automatische Materialkostenschätzung pro User sowie Gemeinschafts-Statistiken.
 
-### 3. Multi-User, Ersteinrichtung & RBAC-Rechtesystem
+### 3. Multi-User, Ersteinrichtung, OpenID Connect (SSO), TOTP 2FA & RBAC
 - **Ersteinrichtung (`/setup`)**: Es gibt keine vorinstallierten Demo-Accounts. Beim allerersten Aufruf der Anwendung wird automatisch der Einrichtungsdialog für den ersten **Administrator- & Operator-Account** angezeigt.
+- **Zwei-Faktor-Authentifizierung (TOTP 2FA)**: Jeder Benutzer kann unter `/account/security` eine Authenticator-App (Google Authenticator, Bitwarden, 1Password, Ente Auth, Authy) per QR-Code verknüpfen und erhält 8 Notfall-Recovery-Codes.
+- **OpenID Connect (OIDC / Single Sign-On)**: Direkte Anbindung an Identity-Provider wie *Authentik*, *Keycloak*, *Pocket ID*, *Authelia*, *Google* oder *Microsoft Entra* (inkl. PKCE) – konfigurierbar über die Admin-Oberfläche (`/admin`) oder per Umgebungsvariablen.
 - **Onboarding für Freunde/Mitspieler**: Registrierung per **Einladungs-Code (`InviteToken`)** oder mit Admin-Freischaltung.
 - **Feingranulare Berechtigungen (`AppPermissions`)**: Standardrollen (`Admin`, `Drucker-Operator`, `Bibliotheks-Kurator`, `Anforderer`) mit live im Admin-Bereich anpassbarer Berechtigungs-Matrix.
 - **Webhooks**: Benachrichtigungen über Discord, Telegram, generischen JSON-Webhook oder SMTP.

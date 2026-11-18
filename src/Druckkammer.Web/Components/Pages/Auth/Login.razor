@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthConfigurationService AuthConfigService
 @inject NavigationManager Nav
 
 <PageTitle>Anmelden – Druckkammer</PageTitle>
@@ -23,6 +24,14 @@
             {
                 <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">Dein Account wartet noch auf die Freischaltung durch den Administrator.</MudAlert>
             }
+            else if (_error == "oidc_failed")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">OpenID Connect Anmeldung fehlgeschlagen. Bitte prüfe die Provider-Konfiguration.</MudAlert>
+            }
+            else if (_error == "oidc_disabled")
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">OpenID Connect ist aktuell nicht aktiviert.</MudAlert>
+            }
             @if (_info == "pending_approval")
             {
                 <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">Registrierung erfolgreich! Sobald der Admin deinen Account freischaltet, kannst du dich anmelden.</MudAlert>
@@ -37,9 +46,18 @@
                               Required="true" Class="mb-4" />
                 <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
                            StartIcon="@Icons.Material.Filled.Login">
-                    Anmelden
+                    Mit E-Mail &amp; Passwort anmelden
                 </MudButton>
             </form>
+
+            @if (_oidcConfig is { Enabled: true })
+            {
+                <MudDivider Class="my-4" />
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" FullWidth="true" Size="Size.Large"
+                           StartIcon="@Icons.Material.Filled.Key" Href="/auth/oidc-login">
+                    Mit @_oidcConfig.ProviderName anmelden (OpenID)
+                </MudButton>
+            }
 
             <div class="text-center mt-4">
                 <MudLink Href="/register" Typo="Typo.body2">Neu hier? Mit Einladungs-Code oder zur Freischaltung registrieren →</MudLink>
@@ -51,6 +69,7 @@
 @code {
     private string? _error;
     private string? _info;
+    private OidcConfigModel? _oidcConfig;
 
     protected override async Task OnInitializedAsync()
     {
@@ -60,6 +79,8 @@
             Nav.NavigateTo("/setup", replace: true);
             return;
         }
+
+        _oidcConfig = await AuthConfigService.GetOidcConfigAsync();
 
         var uri = Nav.ToAbsoluteUri(Nav.Uri);
         var query = QueryHelpers.ParseQuery(uri.Query);

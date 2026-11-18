@@ -1,0 +1,62 @@
+@page "/login-2fa"
+@using Microsoft.AspNetCore.WebUtilities
+@inject NavigationManager Nav
+
+<PageTitle>Zwei-Faktor-Authentifizierung (TOTP) – Druckkammer</PageTitle>
+
+<MudGrid Justify="Justify.Center" Class="mt-6">
+    <MudItem xs="12" sm="8" md="5">
+        <MudPaper Elevation="4" Class="pa-6" Style="border-radius: 16px; border-top: 4px solid #26A69A;">
+            <div class="d-flex flex-column align-center mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.PhonelinkLock" Color="Color.Secondary" Style="font-size: 3.2rem;" />
+                <MudText Typo="Typo.h5" Style="font-weight: 800;" Class="mt-2">Zwei-Faktor-Bestätigung (TOTP)</MudText>
+                <MudText Typo="Typo.body2" Class="text-center" Style="opacity: 0.75;">
+                    Gib den 6-stelligen Sicherheitscode aus deiner Authenticator-App (oder einen Recovery-Code) ein.
+                </MudText>
+            </div>
+
+            @if (_error == "invalid_code")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">
+                    Der eingegebene TOTP- oder Recovery-Code ist ungültig. Bitte versuche es erneut.
+                </MudAlert>
+            }
+
+            <form method="post" action="/auth/login-2fa">
+                <MudTextField T="string" Label="6-stelliger Authenticator-Code (oder Recovery-Code)"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Placeholder="123 456"
+                              UserAttributes="@(new Dictionary<string, object> { ["name"] = "code", ["autocomplete"] = "one-time-code", ["autofocus"] = "autofocus" })"
+                              Required="true" Class="mb-3" />
+
+                <div class="d-flex justify-space-between align-center mb-4">
+                    <MudCheckBox T="bool" @bind-Value="_rememberMachine" Color="Color.Secondary" Dense="true"
+                                 Label="Diesem Browser 30 Tage vertrauen" />
+                    <input type="hidden" name="rememberMachine" value="@(_rememberMachine ? "true" : "false")" />
+                </div>
+
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Secondary" FullWidth="true" Size="Size.Large"
+                           StartIcon="@Icons.Material.Filled.VerifiedUser">
+                    Code bestätigen &amp; anmelden
+                </MudButton>
+            </form>
+
+            <div class="text-center mt-4">
+                <MudLink Href="/login" Typo="Typo.body2">← Zurück zum Login</MudLink>
+            </div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string? _error;
+    private bool _rememberMachine = true;
+
+    protected override void OnInitialized()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("error", out var err))
+            _error = err.ToString();
+    }
+}

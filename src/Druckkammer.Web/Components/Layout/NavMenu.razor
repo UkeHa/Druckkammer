@@ -34,6 +34,13 @@
         Drucker, Resins & Kosten
     </MudNavLink>
 
+    @if (CurrentUser.IsAuthenticated)
+    {
+        <MudNavLink Href="/account/security" Icon="@Icons.Material.Filled.PhonelinkLock">
+            Konto &amp; 2FA (TOTP)
+        </MudNavLink>
+    }
+
     @if (CurrentUser.HasPermission(AppPermissions.SystemAdmin) || CurrentUser.HasPermission(AppPermissions.LibraryScanFolders))
     {
         <MudDivider Class="my-2" />

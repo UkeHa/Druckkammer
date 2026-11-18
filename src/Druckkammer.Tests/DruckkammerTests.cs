@@ -285,4 +285,59 @@ public class DruckkammerTests
                 File.Delete(tempDbPath);
         }
     }
+
+    [Fact]
+    public async Task TotpAndOidcConfiguration_ShouldGenerateQrSvgAndPersistOidcSettings()
+    {
+        string formatted = AuthConfigurationService.FormatAuthenticatorKey("jbswy3dpehpk3pxp");
+        Assert.Equal("JBSW Y3DP EHPK 3PXP", formatted);
+
+        string otpUri = AuthConfigurationService.BuildOtpAuthUri("uke@example.com", "JBSWY3DPEHPK3PXP");
+        Assert.Contains("otpauth://totp/Druckkammer:", otpUri);
+        Assert.Contains("secret=JBSWY3DPEHPK3PXP", otpUri);
+
+        string svg = AuthConfigurationService.GenerateTotpQrCodeSvg(otpUri);
+        Assert.Contains("<svg", svg);
+
+        string tempDbPath = Path.Combine(Path.GetTempPath(), $"DruckkammerOidcTest_{Guid.NewGuid():N}.db");
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddDbContextFactory<ApplicationDbContext>(opt => opt.UseSqlite($"Data Source={tempDbPath}"));
+            services.AddHttpClient();
+            services.AddLogging();
+            var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+            services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(config);
+            services.AddScoped<AuthConfigurationService>();
+
+            var provider = services.BuildServiceProvider();
+            var dbFactory = provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                await db.Database.EnsureCreatedAsync();
+            }
+
+            var authService = provider.GetRequiredService<AuthConfigurationService>();
+            await authService.SaveOidcConfigAsync(new OidcConfigModel(
+                Enabled: true,
+                ProviderName: "Authentik SSO",
+                Authority: "https://auth.example.com/application/o/druckkammer",
+                ClientId: "druckkammer-client",
+                ClientSecret: "super-secret",
+                Scopes: "openid profile email",
+                AutoApproveUsers: true,
+                DefaultRole: AppRoles.Requester));
+
+            var loaded = await authService.GetOidcConfigAsync();
+            Assert.True(loaded.Enabled);
+            Assert.Equal("Authentik SSO", loaded.ProviderName);
+            Assert.Equal("https://auth.example.com/application/o/druckkammer", loaded.Authority);
+            Assert.Equal("druckkammer-client", loaded.ClientId);
+        }
+        finally
+        {
+            if (File.Exists(tempDbPath))
+                File.Delete(tempDbPath);
+        }
+    }
 }

@@ -7,27 +7,29 @@
 @inject RoleManager<IdentityRole> RoleManager
 @inject ManagedStorageService StorageService
 @inject NotificationService NotificationService
+@inject AuthConfigurationService AuthConfigService
 @inject UserContextService UserContext
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
-<PageTitle>Administration & Ordner-Scanner – Druckkammer</PageTitle>
+<PageTitle>Administration &amp; Ordner-Scanner – Druckkammer</PageTitle>
 
 <div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h4" Style="font-weight: 800;">System-Administration & Ordner-Scanner</MudText>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">System-Administration &amp; Ordner-Scanner</MudText>
         <MudText Typo="Typo.body2" Style="opacity: 0.75;">
-            Verzeichnis-Scanner (Copy-on-Import + SHA-256 Deduplizierung), Benutzer & Einladungen, Rollen-Berechtigungen und Webhooks.
+            Verzeichnis-Scanner (Copy-on-Import + SHA-256 Deduplizierung), Benutzer &amp; 2FA, OpenID Connect (SSO), Rollen-Berechtigungen und Webhooks.
         </MudText>
     </div>
 </div>
 
-<MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+<MudTabs Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pt-4">
     <!-- Tab 1: Verzeichnis-Scanner (/import -> /data/storage) -->
     <MudTabPanel Text="📂 Ordner-Scanner (NAS / Import)" Icon="@Icons.Material.Filled.DocumentScanner">
         <MudPaper Elevation="2" Class="pa-4 mb-4">
             <div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-3">
                 <div>
-                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Verzeichnis-Scanner (Copy-on-Import & SHA-256 Hash-Deduplizierung)</MudText>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Verzeichnis-Scanner (Copy-on-Import &amp; SHA-256 Hash-Deduplizierung)</MudText>
                     <MudText Typo="Typo.body2" Style="opacity: 0.8;">
                         Quell-Mount: <code>@StorageService.ImportDirectory</code> → Kanonischer App-Speicher: <code>@StorageService.StorageRoot</code>
                     </MudText>
@@ -36,7 +38,7 @@
                 <div class="d-flex flex-wrap gap-2">
                     <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Science"
                                OnClick="GenerateSampleImportFolderAndScanAsync" Disabled="_isScanning">
-                        Test-Bundle in /import erzeugen & scannen
+                        Test-Bundle in /import erzeugen &amp; scannen
                     </MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Radar"
                                OnClick="RunFolderScanAsync" Disabled="_isScanning">
@@ -64,8 +66,8 @@
         </MudPaper>
     </MudTabPanel>
 
-    <!-- Tab 2: Benutzer & Einladungs-Links -->
-    <MudTabPanel Text="👥 Benutzer & Einladungen" Icon="@Icons.Material.Filled.People">
+    <!-- Tab 2: Benutzer, 2FA & Einladungs-Links -->
+    <MudTabPanel Text="👥 Benutzer, 2FA &amp; Einladungen" Icon="@Icons.Material.Filled.People">
         <MudGrid Spacing="3">
             <MudItem xs="12" md="7">
                 <MudPaper Elevation="2" Class="pa-4">
@@ -73,10 +75,11 @@
                     <MudSimpleTable Dense="true" Hover="true">
                         <thead>
                             <tr>
-                                <th>Name & E-Mail</th>
+                                <th>Name &amp; E-Mail</th>
                                 <th>Rollen</th>
+                                <th>2FA (TOTP)</th>
                                 <th>Status</th>
-                                <th style="text-align: right;">Rolle ändern / Freischalten</th>
+                                <th style="text-align: right;">Aktionen</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -92,6 +95,22 @@
                                         @foreach (var r in roles)
                                         {
                                             <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@r</MudChip>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (u.TwoFactorEnabled)
+                                        {
+                                            <div class="d-flex align-center gap-1">
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Success">🔒 Aktiv</MudChip>
+                                                <MudTooltip Text="2FA für diesen Benutzer zurücksetzen (Notfall)">
+                                                    <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" Color="Color.Warning"
+                                                                   OnClick="@(() => ResetUser2faAsync(u.Id))" />
+                                                </MudTooltip>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">Aus</MudChip>
                                         }
                                     </td>
                                     <td>
@@ -163,8 +182,69 @@
         </MudGrid>
     </MudTabPanel>
 
-    <!-- Tab 3: Rollen & Granulare Berechtigungs-Matrix (RBAC) -->
-    <MudTabPanel Text="🛡️ Rollen & Rechte-Matrix" Icon="@Icons.Material.Filled.Security">
+    <!-- Tab 3: OpenID Connect (SSO) & 2FA Konfiguration -->
+    <MudTabPanel Text="🔐 OpenID Connect (SSO)" Icon="@Icons.Material.Filled.Key">
+        <MudPaper Elevation="2" Class="pa-5">
+            <div class="d-flex justify-space-between align-center mb-3">
+                <div>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">OpenID Connect (OIDC / Single Sign-On) Provider</MudText>
+                    <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+                        Verbinde Druckkammer mit Authentik, Keycloak, Pocket ID, Authelia, Google, Microsoft Entra oder GitLab OIDC.
+                    </MudText>
+                </div>
+                <MudSwitch T="bool" @bind-Value="_oidcEnabled" Color="Color.Secondary" Label="OpenID Connect aktivieren" />
+            </div>
+
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+                Hinterlege in deinem Identity-Provider folgende <strong>Redirect / Callback URI</strong>:
+                <code>@(Nav.BaseUri.TrimEnd('/'))/auth/oidc-callback</code>
+            </MudAlert>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    <MudTextField @bind-Value="_oidcProviderName" Label="Anzeigename auf dem Login-Button (z.B. Authentik SSO)"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <MudTextField @bind-Value="_oidcAuthority" Label="Authority / Issuer URL (inkl. .well-known/openid-configuration Basis)"
+                                  Placeholder="https://auth.example.com/application/o/druckkammer"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="5">
+                    <MudTextField @bind-Value="_oidcClientId" Label="Client ID" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudTextField @bind-Value="_oidcClientSecret" Label="Client Secret (optional bei PKCE Public Clients)"
+                                  InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudTextField @bind-Value="_oidcScopes" Label="Scopes" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+
+                <MudItem xs="12" sm="6" Class="d-flex align-center">
+                    <MudCheckBox T="bool" @bind-Value="_oidcAutoApprove" Color="Color.Success" Dense="true"
+                                 Label="Neue Benutzer über diesen OIDC-Provider sofort freischalten (ohne manuelle Admin-Freigabe)" />
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudSelect T="string" @bind-Value="_oidcDefaultRole" Label="Standardrolle für neue OIDC-User" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var r in AppRoles.All)
+                        {
+                            <MudSelectItem Value="@r">@r</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="3" Class="d-flex justify-end align-center">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="SaveOidcConfigAsync">
+                        OIDC-Einstellungen speichern
+                    </MudButton>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+    </MudTabPanel>
+
+    <!-- Tab 4: Rollen & Granulare Berechtigungs-Matrix (RBAC) -->
+    <MudTabPanel Text="🛡️ Rollen &amp; Rechte-Matrix" Icon="@Icons.Material.Filled.Security">
         <MudPaper Elevation="2" Class="pa-4">
             <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-1">Granulare Einzelberechtigungen pro Rolle (RBAC)</MudText>
             <MudText Typo="Typo.body2" Class="mb-3" Style="opacity: 0.75;">
@@ -208,11 +288,11 @@
         </MudPaper>
     </MudTabPanel>
 
-    <!-- Tab 4: Webhooks & Benachrichtigungen -->
+    <!-- Tab 5: Webhooks & Benachrichtigungen -->
     <MudTabPanel Text="🔔 Webhooks (Discord / Telegram / Mail)" Icon="@Icons.Material.Filled.Webhook">
         <MudPaper Elevation="2" Class="pa-4 mb-4">
             <MudText Typo="Typo.h6" Style="font-weight: 700;" Class="mb-3">Neuen Benachrichtigungs-Webhook anlegen</MudText>
-            <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+            <MudGrid Spacing="2">
                 <MudItem xs="12" sm="3">
                     <MudTextField @bind-Value="_whName" Label="Name (z.B. D&D Discord #3d-druck)" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 </MudItem>
@@ -271,6 +351,16 @@
     private string _newInviteDesc = "Einladung für Mitspieler";
     private string _newInviteRole = AppRoles.Requester;
 
+    // OpenID Connect Felder
+    private bool _oidcEnabled;
+    private string _oidcProviderName = "OpenID Connect (SSO)";
+    private string _oidcAuthority = string.Empty;
+    private string _oidcClientId = string.Empty;
+    private string _oidcClientSecret = string.Empty;
+    private string _oidcScopes = "openid profile email";
+    private bool _oidcAutoApprove = true;
+    private string _oidcDefaultRole = AppRoles.Requester;
+
     private string _whName = string.Empty;
     private WebhookProviderType _whType = WebhookProviderType.Discord;
     private string _whUrl = string.Empty;
@@ -287,6 +377,16 @@
         _users = await db.Users.OrderBy(u => u.DisplayName).AsNoTracking().ToListAsync();
         _inviteTokens = await db.InviteTokens.OrderByDescending(t => t.CreatedAt).AsNoTracking().ToListAsync();
         _webhooks = await db.NotificationWebhooks.OrderByDescending(w => w.CreatedAt).AsNoTracking().ToListAsync();
+
+        var oidc = await AuthConfigService.GetOidcConfigAsync();
+        _oidcEnabled = oidc.Enabled;
+        _oidcProviderName = oidc.ProviderName;
+        _oidcAuthority = oidc.Authority;
+        _oidcClientId = oidc.ClientId;
+        _oidcClientSecret = oidc.ClientSecret;
+        _oidcScopes = oidc.Scopes;
+        _oidcAutoApprove = oidc.AutoApproveUsers;
+        _oidcDefaultRole = oidc.DefaultRole;
 
         _userRoles.Clear();
         foreach (var u in _users)
@@ -308,6 +408,34 @@
                     .Select(c => c.Value)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
             }
+        }
+    }
+
+    private async Task SaveOidcConfigAsync()
+    {
+        var model = new OidcConfigModel(
+            Enabled: _oidcEnabled,
+            ProviderName: string.IsNullOrWhiteSpace(_oidcProviderName) ? "OpenID Connect" : _oidcProviderName.Trim(),
+            Authority: _oidcAuthority.Trim(),
+            ClientId: _oidcClientId.Trim(),
+            ClientSecret: _oidcClientSecret.Trim(),
+            Scopes: string.IsNullOrWhiteSpace(_oidcScopes) ? "openid profile email" : _oidcScopes.Trim(),
+            AutoApproveUsers: _oidcAutoApprove,
+            DefaultRole: _oidcDefaultRole);
+
+        await AuthConfigService.SaveOidcConfigAsync(model);
+        Snackbar.Add("OpenID Connect (SSO) Konfiguration gespeichert!", Severity.Success);
+    }
+
+    private async Task ResetUser2faAsync(string userId)
+    {
+        var user = await UserManager.FindByIdAsync(userId);
+        if (user is not null)
+        {
+            await UserManager.SetTwoFactorEnabledAsync(user, false);
+            await UserManager.ResetAuthenticatorKeyAsync(user);
+            await LoadAdminDataAsync();
+            Snackbar.Add($"Zwei-Faktor-Authentifizierung (2FA) für '{user.DisplayName}' wurde zurückgesetzt.", Severity.Info);
         }
     }
 

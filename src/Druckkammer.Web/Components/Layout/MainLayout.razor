@@ -47,9 +47,12 @@
                                    Color="Color.Inherit" OnClick="@(() => _isDarkMode = !_isDarkMode)" />
                 </MudTooltip>
 
-                <MudChip T="string" Color="Color.Surface" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Person">
-                    @_currentUser.DisplayName (@string.Join(", ", _currentUser.Roles))
-                </MudChip>
+                <MudTooltip Text="Konto-Sicherheit & Zwei-Faktor-Authentifizierung (TOTP)">
+                    <MudChip T="string" Color="Color.Surface" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Security"
+                             Href="/account/security">
+                        @_currentUser.DisplayName (@string.Join(", ", _currentUser.Roles))
+                    </MudChip>
+                </MudTooltip>
 
                 <MudTooltip Text="Abmelden">
                     <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" Href="/auth/logout" />

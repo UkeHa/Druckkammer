@@ -1,0 +1,246 @@
+@page "/account/security"
+@using Microsoft.AspNetCore.Identity
+@inject UserManager<ApplicationUser> UserManager
+@inject UserContextService UserContext
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Konto-Sicherheit &amp; 2FA (TOTP) – Druckkammer</PageTitle>
+
+<div class="d-flex flex-wrap justify-space-between align-center gap-3 mb-4">
+    <div>
+        <MudText Typo="Typo.h4" Style="font-weight: 800;">🔐 Konto-Sicherheit, TOTP 2FA &amp; SSO</MudText>
+        <MudText Typo="Typo.body2" Style="opacity: 0.75;">
+            Richte eine Zwei-Faktor-Authentifizierung (TOTP) per Authenticator-App für dein Benutzerkonto ein.
+        </MudText>
+    </div>
+</div>
+
+@if (_user is null)
+{
+    <MudAlert Severity="Severity.Warning">Bitte melde dich zuerst an, um deine Sicherheitseinstellungen zu verwalten.</MudAlert>
+}
+else
+{
+    <MudGrid Spacing="3">
+        <!-- Linke Spalte: TOTP 2FA Status & Einrichtung -->
+        <MudItem xs="12" md="7">
+            <MudPaper Elevation="2" Class="pa-5">
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.PhonelinkLock" Color="@(_is2faEnabled ? Color.Success : Color.Warning)" Size="Size.Large" />
+                        <div>
+                            <MudText Typo="Typo.h6" Style="font-weight: 700;">Zwei-Faktor-Authentifizierung (TOTP)</MudText>
+                            <MudText Typo="Typo.caption" Style="opacity: 0.75;">
+                                Kompatibel mit Google Authenticator, Bitwarden, 1Password, Ente Auth, Authy &amp; KeePassXC
+                            </MudText>
+                        </div>
+                    </div>
+
+                    <MudChip T="string" Color="@(_is2faEnabled ? Color.Success : Color.Default)" Variant="Variant.Filled">
+                        @(_is2faEnabled ? "✓ 2FA Aktiv" : "Nicht aktiviert")
+                    </MudChip>
+                </div>
+
+                @if (_recoveryCodes is { Count: > 0 })
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-4">
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 800;">
+                            ⚠️ WICHTIG: Speichere deine 8 Notfall-Recovery-Codes!
+                        </MudText>
+                        <MudText Typo="Typo.caption" Class="d-block mb-2">
+                            Falls du dein Smartphone verlierst, kannst du dich mit jedem dieser Codes einmalig anmelden:
+                        </MudText>
+                        <div class="d-flex flex-wrap gap-2 pa-2 rounded" style="background: rgba(0,0,0,0.25); font-family: monospace;">
+                            @foreach (var rc in _recoveryCodes)
+                            {
+                                <span style="padding: 2px 8px; background: rgba(255,255,255,0.1); border-radius: 4px;">@rc</span>
+                            }
+                        </div>
+                    </MudAlert>
+                }
+
+                @if (!_is2faEnabled)
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700;" Class="mb-2">
+                        1. QR-Code mit deiner Authenticator-App scannen
+                    </MudText>
+
+                    <div class="d-flex flex-wrap align-center gap-4 my-3">
+                        <div class="pa-3 rounded" style="background: #181B24; border: 1px solid rgba(255,255,255,0.12); width: 210px; height: 210px;">
+                            @((MarkupString)_qrCodeSvg)
+                        </div>
+
+                        <div style="flex: 1; min-width: 240px;">
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                Scanne den QR-Code rechts oder gib diesen geheimen Base32-Schlüssel manuell in deine App ein:
+                            </MudText>
+                            <MudPaper Outlined="true" Class="pa-2 mb-3" Style="font-family: monospace; font-weight: 700; letter-spacing: 0.08em; background: rgba(149,117,205,0.08);">
+                                @_formattedKey
+                            </MudPaper>
+
+                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700;" Class="mb-2">
+                                2. 6-stelligen Code zur Bestätigung eingeben
+                            </MudText>
+                            <div class="d-flex gap-2 align-center">
+                                <MudTextField @bind-Value="_verificationCode" Label="6-stelliger TOTP-Code" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                              Placeholder="123456" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.CheckCircle"
+                                           OnClick="VerifyAndEnable2faAsync">
+                                    2FA aktivieren
+                                </MudButton>
+                            </div>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.body2" Class="mb-4">
+                        Dein Konto ist durch TOTP Zwei-Faktor-Authentifizierung geschützt. Beim nächsten Login mit E-Mail und Passwort wirst du nach deinem 6-stelligen Authenticator-Code gefragt.
+                    </MudText>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.Refresh"
+                                   OnClick="RegenerateRecoveryCodesAsync">
+                            Neue Recovery-Codes generieren
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.LockOpen"
+                                   OnClick="Disable2faAsync">
+                            2FA deaktivieren
+                        </MudButton>
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <!-- Rechte Spalte: Verknüpfte OpenID Connect Logins & Kontoinfos -->
+        <MudItem xs="12" md="5">
+            <MudPaper Elevation="2" Class="pa-5">
+                <div class="d-flex align-center gap-2 mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.Badge" Color="Color.Primary" />
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Benutzerkonto &amp; Verknüpfte SSO-Logins</MudText>
+                </div>
+
+                <MudText Typo="Typo.body2" Class="mb-1"><strong>Anzeigename:</strong> @_user.DisplayName</MudText>
+                <MudText Typo="Typo.body2" Class="mb-3"><strong>E-Mail:</strong> @_user.Email</MudText>
+
+                <MudDivider Class="my-3" />
+                <MudText Typo="Typo.subtitle2" Style="font-weight: 700;" Class="mb-2">Verknüpfte OpenID Connect (SSO) Identitäten</MudText>
+                @if (_externalLogins.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Normal" Dense="true">
+                        Noch kein externer OpenID Connect Provider mit diesem Konto verknüpft. Wenn du dich über SSO mit derselben E-Mail-Adresse anmeldest, wird dein Konto automatisch zugeordnet.
+                    </MudAlert>
+                }
+                else
+                {
+                    @foreach (var login in _externalLogins)
+                    {
+                        <MudPaper Outlined="true" Class="pa-2 mb-2 d-flex justify-space-between align-center">
+                            <div>
+                                <MudText Typo="Typo.body2" Style="font-weight: 700;">🔗 @login.ProviderDisplayName (@login.LoginProvider)</MudText>
+                                <MudText Typo="Typo.caption" Style="opacity: 0.7;">Subject-ID: @login.ProviderKey</MudText>
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">Verbunden</MudChip>
+                        </MudPaper>
+                    }
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private ApplicationUser? _user;
+    private bool _is2faEnabled;
+    private string _formattedKey = string.Empty;
+    private string _qrCodeSvg = string.Empty;
+    private string _verificationCode = string.Empty;
+    private List<string> _recoveryCodes = [];
+    private IList<UserLoginInfo> _externalLogins = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var current = await UserContext.GetCurrentUserAsync();
+        if (!current.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await LoadSecurityStateAsync(current.UserId);
+    }
+
+    private async Task LoadSecurityStateAsync(string userId)
+    {
+        _user = await UserManager.FindByIdAsync(userId);
+        if (_user is null) return;
+
+        _is2faEnabled = await UserManager.GetTwoFactorEnabledAsync(_user);
+        _externalLogins = await UserManager.GetLoginsAsync(_user);
+
+        string? unformattedKey = await UserManager.GetAuthenticatorKeyAsync(_user);
+        if (string.IsNullOrWhiteSpace(unformattedKey))
+        {
+            await UserManager.ResetAuthenticatorKeyAsync(_user);
+            unformattedKey = await UserManager.GetAuthenticatorKeyAsync(_user);
+        }
+
+        if (!string.IsNullOrWhiteSpace(unformattedKey))
+        {
+            _formattedKey = AuthConfigurationService.FormatAuthenticatorKey(unformattedKey);
+            string otpUri = AuthConfigurationService.BuildOtpAuthUri(_user.Email ?? _user.DisplayName, unformattedKey);
+            _qrCodeSvg = AuthConfigurationService.GenerateTotpQrCodeSvg(otpUri);
+        }
+    }
+
+    private async Task VerifyAndEnable2faAsync()
+    {
+        if (_user is null) return;
+        string cleanCode = _verificationCode.Replace(" ", string.Empty).Replace("-", string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(cleanCode))
+        {
+            Snackbar.Add("Bitte gib den 6-stelligen Code aus deiner Authenticator-App ein.", Severity.Warning);
+            return;
+        }
+
+        bool isValid = await UserManager.VerifyTwoFactorTokenAsync(
+            _user,
+            UserManager.Options.Tokens.AuthenticatorTokenProvider,
+            cleanCode);
+
+        if (!isValid)
+        {
+            Snackbar.Add("Der eingegebene Code ist ungültig. Bitte prüfe die Uhrzeit deines Geräts und versuche es erneut.", Severity.Error);
+            return;
+        }
+
+        await UserManager.SetTwoFactorEnabledAsync(_user, true);
+        var codes = await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(_user, 8);
+        _recoveryCodes = codes?.ToList() ?? [];
+        _verificationCode = string.Empty;
+        _is2faEnabled = true;
+
+        Snackbar.Add("Zwei-Faktor-Authentifizierung (TOTP) wurde erfolgreich aktiviert!", Severity.Success);
+    }
+
+    private async Task RegenerateRecoveryCodesAsync()
+    {
+        if (_user is null) return;
+        var codes = await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(_user, 8);
+        _recoveryCodes = codes?.ToList() ?? [];
+        Snackbar.Add("8 neue Notfall-Recovery-Codes generiert!", Severity.Info);
+    }
+
+    private async Task Disable2faAsync()
+    {
+        if (_user is null) return;
+        await UserManager.SetTwoFactorEnabledAsync(_user, false);
+        await UserManager.ResetAuthenticatorKeyAsync(_user);
+        _recoveryCodes.Clear();
+        await LoadSecurityStateAsync(_user.Id);
+        Snackbar.Add("Zwei-Faktor-Authentifizierung wurde deaktiviert.", Severity.Warning);
+    }
+}

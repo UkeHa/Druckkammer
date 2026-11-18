@@ -12,6 +12,12 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - Druckkammer__DataDirectory=/data
       - Druckkammer__ImportDirectory=/import
+      # Optional: OpenID Connect (SSO) via Umgebungsvariablen (alternativ direkt im Admin-Menü konfigurierbar)
+      # - Druckkammer__OpenIdConnect__Enabled=true
+      # - Druckkammer__OpenIdConnect__ProviderName=Authentik SSO
+      # - Druckkammer__OpenIdConnect__Authority=https://auth.example.com/application/o/druckkammer
+      # - Druckkammer__OpenIdConnect__ClientId=druckkammer
+      # - Druckkammer__OpenIdConnect__ClientSecret=your-secret
     volumes:
       # Verwalteter App-Speicher (SQLite Datenbank, kopierte Modelle, Thumbnails, Makes-Fotos)
       - ./data:/data
