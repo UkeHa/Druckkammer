@@ -6,6 +6,8 @@
 
 **Druckkammer** ist eine selbstgehostete Multi-User-Webanwendung für 3D-Druck-Enthusiasten, Freundeskreise und Pen-&-Paper-/Tabletop-Runden. Sie verbindet eine verwaltete **3D-Modell-Bibliothek** (für große STL-/Abo-Sammlungen von Patreon, MyMiniFactory Tribes etc.) mit einem **Session-Warenkorb**, **Buildplate-Batching** und einem **Kanban-Board** für Resin- (SLA) und Filament-Druckjobs (FDM).
 
+📄 **[Zum vollständigen Changelog (`CHANGELOG.md`)](CHANGELOG.md)**
+
 ---
 
 ## 📸 Screenshots
