@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E2232" />
+      <stop offset="100%" stop-color="#10131C" />
+    </linearGradient>
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#B39DDB" />
+      <stop offset="100%" stop-color="#7E57C2" />
+    </linearGradient>
+    <linearGradient id="tealGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4DB6AC" />
+      <stop offset="100%" stop-color="#00897B" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded Squircle Background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bgGrad)" stroke="#7E57C2" stroke-width="3" stroke-opacity="0.6" />
+
+  <!-- Top Gantry & Print Nozzle / UV Head -->
+  <rect x="24" y="16" width="80" height="6" rx="3" fill="#546E7A" />
+  <path d="M52 22 H76 L70 34 H58 Z" fill="url(#purpleGlow)" />
+  <polygon points="60,34 68,34 64,42" fill="#4DB6AC" />
+
+  <!-- UV / Laser Print Beams -->
+  <line x1="64" y1="42" x2="42" y2="82" stroke="#26A69A" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.75" />
+  <line x1="64" y1="42" x2="86" y2="82" stroke="#26A69A" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.75" />
+
+  <!-- 3D Printed Faceted Crystal / D20 Miniature on Buildplate -->
+  <polygon points="64,44 44,64 64,74" fill="#9575CD" opacity="0.95" />
+  <polygon points="64,44 84,64 64,74" fill="#7E57C2" opacity="0.95" />
+  <polygon points="44,64 64,74 50,90" fill="#5E35B1" />
+  <polygon points="84,64 64,74 78,90" fill="#512DA8" />
+  <polygon points="64,74 50,90 78,90" fill="url(#tealGlow)" />
+
+  <!-- Isometric Buildplate Platform -->
+  <polygon points="64,82 104,96 64,110 24,96" fill="#263238" stroke="#4DB6AC" stroke-width="2.5" />
+  <polygon points="24,96 64,110 64,116 24,102" fill="#1C262B" />
+  <polygon points="104,96 64,110 64,116 104,102" fill="#151D21" />
+</svg>

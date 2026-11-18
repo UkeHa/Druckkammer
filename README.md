@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="Druckkammer Logo" width="180" style="border-radius: 24px;" />
+</p>
+
 # 🛠️ Druckkammer – 3D-Modellbibliothek & Druckjobverwaltung (.NET 11 Blazor)
 
 **Druckkammer** ist eine selbstgehostete Multi-User-Webanwendung für 3D-Druck-Enthusiasten, Freundeskreise und Pen-&-Paper-/Tabletop-Runden. Sie verbindet eine verwaltete **3D-Modell-Bibliothek** (für große STL-/Abo-Sammlungen von Patreon, MyMiniFactory Tribes etc.) mit einem **Session-Warenkorb**, **Buildplate-Batching** und einem **Kanban-Board** für Resin- (SLA) und Filament-Druckjobs (FDM).
